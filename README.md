@@ -6,11 +6,7 @@ en HTML/CSS/JS vanilla, sin librerías ni build step, con la paleta instituciona
 
 ## Ver el dashboard
 
-**En línea:** https://evelyngarcia02.github.io/nivelacion/
-
-**En local:** abrí `index.html` con doble clic en el explorador de archivos. No necesita servidor
-ni instalación: los datos ya vienen embebidos en `js/data.js`, así que funciona directo desde el
-disco.
+https://evelyngarcia02.github.io/nivelacion/
 
 ## Qué muestra
 
