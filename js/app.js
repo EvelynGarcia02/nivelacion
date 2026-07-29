@@ -504,7 +504,7 @@ function renderCarreraTab(){
   syncSelectorPlaceholder();
   carreraBody.innerHTML = '';
   if(F.carrera==null){
-    carreraBody.appendChild(el('div',{class:'empty-note'},'Buscá una carrera arriba para ver su detalle (o hacé clic en una fila del mapa de calor "Resultado por Carrera" en la Vista General).'));
+    carreraBody.appendChild(el('div',{class:'empty-note'},'Buscá una carrera arriba para ver su detalle (o hacé clic en una fila de "Resultado por Carrera" en la Vista General).'));
     return;
   }
   const cIdx = F.carrera;
