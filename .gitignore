@@ -1,0 +1,3 @@
+# Insumos internos: CSV fuente (datos crudos), informe PDF, capturas de referencia.
+# js/data.js (agregado y anonimizado) SI se versiona -- es lo que usa el dashboard publicado.
+data/

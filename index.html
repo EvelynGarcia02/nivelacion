@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Académico — Monitoreo Exámenes de Nivelación</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <img src="assets/logo_unemi.png" alt="Universidad Estatal de Milagro" class="brand-logo">
+      <div class="brand-text">
+        <h1>Dashboard Académico<span>Monitoreo Exámenes de Nivelación — 2S2026</span></h1>
+        <div class="brand-rule"></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-view="global"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Vista General</button>
+    <button class="tab-btn" data-view="carrera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/></svg>Por Carrera</button>
+  </div>
+
+  <div id="filterBar" class="filter-bar"></div>
+
+  <section id="view-global" class="view active"></section>
+  <section id="view-carrera" class="view"></section>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
