@@ -6,9 +6,11 @@ en HTML/CSS/JS vanilla, sin librerías ni build step, con la paleta instituciona
 
 ## Ver el dashboard
 
-Abrí `index.html` con doble clic en el explorador de archivos. No necesita servidor ni
-instalación: los datos ya vienen embebidos en `js/data.js`, así que funciona directo desde el
-disco o publicado como sitio estático (GitHub Pages, etc.).
+**En línea:** https://evelyngarcia02.github.io/nivelacion/
+
+**En local:** abrí `index.html` con doble clic en el explorador de archivos. No necesita servidor
+ni instalación: los datos ya vienen embebidos en `js/data.js`, así que funciona directo desde el
+disco.
 
 ## Qué muestra
 
@@ -48,33 +50,3 @@ aprobado/reprobado, 1.967 sin ninguna rendición):
   normalizan y corrigen con la ortografía oficial del informe (`CARRERA_FIX` / `ASIGNATURA_FIX`
   en `scripts/build_data.py`).
 
-## Estructura del repositorio
-
-```
-index.html          punto de entrada
-css/styles.css       estilos (paleta UNEMI, KPIs, mapas de calor, etc.)
-js/app.js            toda la lógica del dashboard (filtros, agregación, render)
-js/data.js           dataset agregado y anonimizado (sin nombres ni cédulas), generado
-assets/logo_unemi.png logo institucional
-scripts/build_data.py script que genera js/data.js a partir del CSV fuente
-data/                 NO está en este repo (ver abajo)
-```
-
-`data/` (el CSV fuente, el informe PDF y las capturas) se mantiene **fuera del repositorio**
-(`.gitignore`) porque son insumos internos de trabajo, no porque el dashboard los necesite para
-funcionar: `js/data.js` ya trae los datos agregados y anonimizados que el sitio usa.
-
-## Actualizar los datos (nuevo período, correcciones, etc.)
-
-1. Colocá `curso_nivelacion_<periodo>.csv` en una carpeta local `data/` (mismo formato de
-   columnas; esa carpeta no se sube al repo).
-2. Instalá dependencias una vez: `pip install pandas`
-3. Ajustá el nombre del archivo en `scripts/build_data.py` (constante `CSV`) si cambia, y corré:
-   `python scripts/build_data.py` → regenera `js/data.js`. Recargá `index.html` para ver los
-   cambios. El script imprime un resumen (filas, estudiantes, carreras/asignaturas/docentes) para
-   verificar rápido que la carga fue consistente.
-4. Commiteá y subí el `js/data.js` actualizado (ese sí va al repo).
-
-Si aparecen carreras o asignaturas nuevas que el script no reconoce en `CARRERA_FIX` /
-`ASIGNATURA_FIX`, se muestran igual (con mejor esfuerzo de capitalización), solo que sin la
-corrección ortográfica manual — se puede agregar la entrada correspondiente en esas listas.
