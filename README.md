@@ -15,7 +15,7 @@ disco.
 ## Qué muestra
 
 **Vista General** (institucional, arranca sin ningún filtro):
-- KPIs: estudiantes inscritos (con la deserción total como dato secundario), % que rindió examen,
+- KPIs: estudiantes inscritos (con los que no tuvieron ninguna rendición como dato secundario), % que rindió examen,
   aprobados completamente, matrículas, % rindió / aprobado / reprobado, estudiantes "a un paso de
   aprobar" (nota entre 60 y 69), total de carreras.
 - Resultado por Carrera y Resultado por Asignatura: mapas de calor (% Rindió / % Aprobado / %
