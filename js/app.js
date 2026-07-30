@@ -62,6 +62,7 @@ function attachTip(elm, text){
   elm.addEventListener('mouseleave', hideTip);
 }
 function fmt1(n){ if(n==null || isNaN(n)) return '—'; return (Math.round(n*10)/10).toString().replace(/\.0$/,''); }
+function fmt2(n){ if(n==null || isNaN(n)) return '—'; return (Math.round(n*100)/100).toFixed(2); }
 function fmtInt(n){ return n.toLocaleString('es-EC'); }
 
 /* escala de riesgo: 0% (verde, aprobado) -> 50% (ambar) -> 100% (rojo, reprobado). Se usa
@@ -219,8 +220,8 @@ function heatmap3Card(opts){
   function cell(x, pct, num, den, detailLabel){
     const color = heatColor(pct);
     const textColor = pct!=null && pct>=50 ? '#fff' : 'var(--text-primary)';
-    const td = el('td',{class:'heat-cell', style:`background:${color};color:${textColor}`}, pct!=null?fmt1(pct)+'%':'—');
-    attachTip(td, opts.labelFn(x.idx)+' — '+(pct!=null?fmt1(pct)+'% ':'')+detailLabel+' ('+fmtInt(num)+' de '+fmtInt(den)+')');
+    const td = el('td',{class:'heat-cell', style:`background:${color};color:${textColor}`}, pct!=null?fmt2(pct)+'%':'—');
+    attachTip(td, opts.labelFn(x.idx)+' — '+(pct!=null?fmt2(pct)+'% ':'')+detailLabel+' ('+fmtInt(num)+' de '+fmtInt(den)+')');
     return td;
   }
   const tableWrap = el('div',{class:'table-scroll'});
@@ -307,8 +308,8 @@ function testParticipacionCard(rows){
       const pct = rowTotal? n/rowTotal*100 : null;
       const bg = heatColor(pct);
       const textColor = pct!=null && pct>=50 ? '#fff' : 'var(--text-primary)';
-      const td = el('td',{class:'heat-cell', style:`background:${bg};color:${textColor}`}, pct!=null?fmt1(pct)+'%':'—');
-      attachTip(td, rd.label+' — '+cd.label+': '+fmtInt(n)+' de '+fmtInt(rowTotal)+(pct!=null?' ('+fmt1(pct)+'%)':''));
+      const td = el('td',{class:'heat-cell', style:`background:${bg};color:${textColor}`}, pct!=null?fmt2(pct)+'%':'—');
+      attachTip(td, rd.label+' — '+cd.label+': '+fmtInt(n)+' de '+fmtInt(rowTotal)+(pct!=null?' ('+fmt2(pct)+'%)':''));
       tr.appendChild(td);
     });
     table.appendChild(tr);
@@ -320,7 +321,7 @@ function testParticipacionCard(rows){
   const altosAprobaron = altos.filter(r=>r[R.ESTADO]===EST.APROBADO);
   if(bajos.length && altos.length){
     card.appendChild(el('p',{class:'caption', style:'margin-top:12px;'},
-      'Dato puntual: entre quienes acumularon de 1 a 9 puntos en los test y rindieron el examen, '+fmt1(bajosAprobaron.length/bajos.length*100)+'% aprobó la asignatura; entre quienes acumularon 30 a 40 puntos, '+fmt1(altosAprobaron.length/altos.length*100)+'% aprobó.'
+      'Dato puntual: entre quienes acumularon de 1 a 9 puntos en los test y rindieron el examen, '+fmt2(bajosAprobaron.length/bajos.length*100)+'% aprobó la asignatura; entre quienes acumularon 30 a 40 puntos, '+fmt2(altosAprobaron.length/altos.length*100)+'% aprobó.'
     ));
   }
   return card;
@@ -354,7 +355,7 @@ function brechaAprobarCard(rows){
     const h = counts[i]/max*100;
     const col = el('div',{class:'gbar-col wide', style:`height:${h}%;background:${b.color}`});
     col.appendChild(el('div',{class:'val'}, fmtInt(counts[i])));
-    attachTip(col, b.label+': '+fmtInt(counts[i])+' estudiantes-curso ('+fmt1(counts[i]/reprobados.length*100)+'% de los reprobados)');
+    attachTip(col, b.label+': '+fmtInt(counts[i])+' estudiantes-curso ('+fmt2(counts[i]/reprobados.length*100)+'% de los reprobados)');
     bars.appendChild(col);
     cat.appendChild(bars);
     wrap.appendChild(cat);
@@ -381,15 +382,15 @@ function renderGlobal(){
   const k = computeKpis(rows);
 
   gView.appendChild(kpiRow([
-    {label:'Total de estudiantes inscritos', icon:'users', value: fmtInt(k.totalEst), sub: k.totalEst? fmtInt(k.sinRendicion)+' sin ninguna rendición ('+fmt1(k.sinRendicion/k.totalEst*100)+'%)':'', accent:true},
-    {label:'% que rindió examen (al menos 1 curso)', icon:'check', value: k.totalEst? fmt1(k.rindioEst/k.totalEst*100)+'%':'—', sub: fmtInt(k.rindioEst)+' de '+fmtInt(k.totalEst)+' estudiantes'},
+    {label:'Total de estudiantes inscritos', icon:'users', value: fmtInt(k.totalEst), sub: k.totalEst? fmtInt(k.sinRendicion)+' sin ninguna rendición ('+fmt2(k.sinRendicion/k.totalEst*100)+'%)':'', accent:true},
+    {label:'% que rindió examen (al menos 1 curso)', icon:'check', value: k.totalEst? fmt2(k.rindioEst/k.totalEst*100)+'%':'—', sub: fmtInt(k.rindioEst)+' de '+fmtInt(k.totalEst)+' estudiantes'},
     {label:'Aprobados completamente (todas sus materias)', icon:'award', value: fmtInt(k.totalAp)},
     {label:'Total de matrículas (estudiante-curso)', icon:'clipboard', value: fmtInt(k.stats.total)},
-    {label:'% Rindió examen (estudiante-curso)', icon:'check', value: k.stats.pctRindio!=null?fmt1(k.stats.pctRindio)+'%':'—', sub: fmtInt(k.stats.rindio)+' de '+fmtInt(k.stats.total)},
+    {label:'% Rindió examen (estudiante-curso)', icon:'check', value: k.stats.pctRindio!=null?fmt2(k.stats.pctRindio)+'%':'—', sub: fmtInt(k.stats.rindio)+' de '+fmtInt(k.stats.total)},
   ]));
   gView.appendChild(kpiRow([
-    {label:'% Aprobado (sobre quienes rindieron)', icon:'award', value: k.stats.pctAprobado!=null?fmt1(k.stats.pctAprobado)+'%':'—'},
-    {label:'% Reprobado (sobre quienes rindieron)', icon:'alert', value: k.stats.pctReprobado!=null?fmt1(k.stats.pctReprobado)+'%':'—'},
+    {label:'% Aprobado (sobre quienes rindieron)', icon:'award', value: k.stats.pctAprobado!=null?fmt2(k.stats.pctAprobado)+'%':'—'},
+    {label:'% Reprobado (sobre quienes rindieron)', icon:'alert', value: k.stats.pctReprobado!=null?fmt2(k.stats.pctReprobado)+'%':'—'},
     {label:'Estudiantes "a un paso de aprobar"', icon:'scale', value: fmtInt(k.cercaAprobar), sub:'nota final entre 60 y 69.9'},
     {label:'Carreras', icon:'grid', value: k.nCarreras},
   ]));
@@ -495,7 +496,7 @@ function buildDropdown(){
     const item = el('div',{class:'dropdown-item'+(F.carrera===idx?' active':''), onclick:()=>selectCarrera(idx)},[
       el('span',{class:'dd-dot', style:`background:${riskColor(s.pctReprobado)}`}),
       el('span',{class:'dd-label'}, label),
-      el('span',{class:'dd-sub'}, fmtInt(s.total)+' matric. · '+(s.pctReprobado!=null?fmt1(s.pctReprobado)+'% reprob.':'sin datos')),
+      el('span',{class:'dd-sub'}, fmtInt(s.total)+' matric. · '+(s.pctReprobado!=null?fmt2(s.pctReprobado)+'% reprob.':'sin datos')),
     ]);
     dropdownMenu.appendChild(item);
   });
@@ -536,8 +537,8 @@ function detalleParalelosCard(rows){
     tr.appendChild(el('td',null, DATA.dict.asignatura[x.a]));
     tr.appendChild(el('td',null, DATA.dict.docente[x.d]));
     tr.appendChild(el('td',null, x.rindio+' / '+x.total));
-    tr.appendChild(el('td',null, x.pctAprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(100-x.pctAprobado)}, fmt1(x.pctAprobado)+'%'):'—'));
-    tr.appendChild(el('td',null, x.pctReprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(x.pctReprobado)}, fmt1(x.pctReprobado)+'%'):'—'));
+    tr.appendChild(el('td',null, x.pctAprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(100-x.pctAprobado)}, fmt2(x.pctAprobado)+'%'):'—'));
+    tr.appendChild(el('td',null, x.pctReprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(x.pctReprobado)}, fmt2(x.pctReprobado)+'%'):'—'));
     table.appendChild(tr);
   });
   tableWrap.appendChild(table);
@@ -564,13 +565,13 @@ function renderCarreraTab(){
 
   carreraBody.appendChild(kpiRow([
     {label:'Matriculados', icon:'clipboard', value: fmtInt(s.total)},
-    {label:'% Rindió examen', icon:'check', value: s.pctRindio!=null?fmt1(s.pctRindio)+'%':'—', sub: fmtInt(s.rindio)+' de '+fmtInt(s.total)},
-    {label:'% Aprobado', icon:'award', value: s.pctAprobado!=null?fmt1(s.pctAprobado)+'%':'—'},
-    {label:'% Reprobado', icon:'alert', value: s.pctReprobado!=null?fmt1(s.pctReprobado)+'%':'—'},
+    {label:'% Rindió examen', icon:'check', value: s.pctRindio!=null?fmt2(s.pctRindio)+'%':'—', sub: fmtInt(s.rindio)+' de '+fmtInt(s.total)},
+    {label:'% Aprobado', icon:'award', value: s.pctAprobado!=null?fmt2(s.pctAprobado)+'%':'—'},
+    {label:'% Reprobado', icon:'alert', value: s.pctReprobado!=null?fmt2(s.pctReprobado)+'%':'—'},
   ]));
   carreraBody.appendChild(kpiRow([
     {label:'Promedio nota final (rindieron)', icon:'trending', value: s.notaProm!=null?fmt1(s.notaProm):'—'},
-    {label:'% no realizó examen', icon:'alert', value: s.pctNorindio!=null?fmt1(s.pctNorindio)+'%':'—', sub: fmtInt(s.norindio)+' matrículas-curso'},
+    {label:'% no realizó examen', icon:'alert', value: s.pctNorindio!=null?fmt2(s.pctNorindio)+'%':'—', sub: fmtInt(s.norindio)+' matrículas-curso'},
     {label:'Asignaturas', icon:'list', value: new Set(rows.map(r=>r[R.ASIG])).size},
     {label:'Docentes', icon:'users', value: new Set(rows.map(r=>r[R.DOC])).size},
   ]));
