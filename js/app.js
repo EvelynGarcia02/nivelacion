@@ -36,6 +36,7 @@ const ICON_PATHS = {
   list:'<path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="m3 15 2 2 4-4"/><path d="M13 16h8"/>',
   clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   search:'<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  download:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
 };
 function icon(name){
   const wrap = document.createElement('div');
@@ -86,6 +87,7 @@ function heatColor(pct){
 
 /* ---------- estado de filtros globales (cross-filter tipo PowerBI) ---------- */
 const F = {carrera:null, asignatura:null, docente:null, estado:null, horario:null};
+function isPrinting(){ return document.body.classList.contains('printing-carrera'); }
 
 function rowMatches(r, exclude){
   if(!exclude.has('carrera') && F.carrera!=null && r[R.CARRERA]!==F.carrera) return false;
@@ -209,6 +211,9 @@ function heatmap3Card(opts){
   const grouped = groupBy(opts.rows, r=>r[dimField]);
   let list = [...grouped.entries()].map(([idx,agg])=>({idx, ...aggStats(agg)}));
   list.sort((a,b)=>(b.pctReprobado??-1)-(a.pctReprobado??-1));
+  if(isPrinting() && F[opts.dim]!=null){
+    list = list.filter(x=>x.idx===F[opts.dim]);
+  }
   if(!list.length){ card.appendChild(el('div',{class:'empty-note'},'Sin datos para este filtro.')); return card; }
   const activeVal = F[opts.dim];
   function cell(x, pct, num, den, detailLabel){
@@ -371,6 +376,7 @@ const gView = document.getElementById('view-global');
 
 function renderGlobal(){
   gView.innerHTML = '';
+  gView.appendChild(el('div',{class:'print-section-banner'},'1. Vista General'));
   const rows = filteredRows();
   const k = computeKpis(rows);
 
@@ -415,9 +421,45 @@ const selSearch = el('input',{class:'sel-search', placeholder:'Buscar carrera...
 const dropdownMenu = el('div',{class:'dropdown-menu'});
 comboWrap.appendChild(selSearch);
 comboWrap.appendChild(dropdownMenu);
+const pdfBtn = el('button',{class:'pdf-btn', type:'button', onclick:()=>downloadCarreraPDF()},[icon('download'), 'Descargar reporte PDF']);
+const carreraToolbar = el('div',{class:'carrera-toolbar'});
+carreraToolbar.appendChild(comboWrap);
+carreraToolbar.appendChild(pdfBtn);
 const carreraBody = el('div',null,null);
-cView.appendChild(comboWrap);
+cView.appendChild(carreraToolbar);
 cView.appendChild(carreraBody);
+
+/* ---------- reporte PDF (impresion): incluye Vista General (siempre) + Detalle por Carrera (si hay una seleccionada) ---------- */
+const printHeader = el('div',{class:'print-header'});
+const wrapEl = document.querySelector('.wrap');
+wrapEl.insertBefore(printHeader, wrapEl.firstChild);
+
+let printOriginalTitle = document.title;
+function downloadCarreraPDF(){
+  const cIdx = F.carrera;
+  printHeader.innerHTML = '';
+  printHeader.appendChild(el('div',{class:'ph-top'},[
+    el('img',{class:'ph-logo', src:'assets/logo_unemi.png', alt:'UNEMI'}),
+    el('div',{class:'ph-titles'},[
+      el('h1',null,'Reporte Académico'),
+      el('div',{class:'sub'}, cIdx!=null
+        ? 'Vista General y Detalle por Carrera: '+DATA.dict.carrera[cIdx]+' ('+DATA.dict.carreraModalidad[cIdx]+')'
+        : 'Vista General'),
+    ]),
+  ]));
+  cView.classList.toggle('print-hide-section', cIdx==null);
+  printOriginalTitle = document.title;
+  document.title = ' ';
+  document.body.classList.add('printing-carrera');
+  rerender();
+  window.print();
+}
+window.addEventListener('afterprint', ()=>{
+  document.body.classList.remove('printing-carrera');
+  cView.classList.remove('print-hide-section');
+  document.title = printOriginalTitle;
+  rerender();
+});
 
 const CARRERA_STATS_ALL = (()=>{
   const grouped = groupBy(DATA.rows, r=>r[R.CARRERA]);
@@ -476,6 +518,9 @@ function detalleParalelosCard(rows){
     return {a, d, ...aggStats(agg)};
   });
   list.sort((a,b)=>(b.pctReprobado??-1)-(a.pctReprobado??-1));
+  if(isPrinting() && (F.asignatura!=null || F.docente!=null)){
+    list = list.filter(x=>(F.asignatura==null || x.a===F.asignatura) && (F.docente==null || x.d===F.docente));
+  }
   if(!list.length){ card.appendChild(el('div',{class:'empty-note'},'Sin datos para esta carrera con el filtro actual.')); return card; }
   const tableWrap = el('div',{class:'table-scroll'});
   const table = el('table',{class:'datatable'});
@@ -512,6 +557,7 @@ function renderCarreraTab(){
   const agg = emptyAgg(); rows.forEach(r=>addRow(agg,r));
   const s = aggStats(agg);
 
+  carreraBody.appendChild(el('div',{class:'print-section-banner'},'2. Detalle por Carrera: '+DATA.dict.carrera[cIdx]));
   carreraBody.appendChild(el('div',{class:'callout-row'},[
     el('div',{class:'callout info'},[el('div',{class:'big'}, DATA.dict.carrera[cIdx]), el('div',{class:'txt'}, DATA.dict.carreraModalidad[cIdx])]),
   ]));
