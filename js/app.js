@@ -1,11 +1,9 @@
 /* Requiere que js/data.js se cargue antes y defina la constante global DATA.
-   Fila de DATA.rows: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, horarioIdx, notaFinal, testProm, examenFinal]
-   estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen
-   horarioIdx: 0 Dentro de horario, 1 Fuera de horario, 2 No aplica */
+   Fila de DATA.rows: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
+   estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen */
 
-const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, HORARIO:5, NOTA:6, TESTPROM:7, EXAMEN:8};
+const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7};
 const EST = {APROBADO:0, REPROBADO:1, NORINDIO:2};
-const HOR = {DENTRO:0, FUERA:1, NOAPLICA:2};
 
 /* ---------- helpers genericos ---------- */
 function el(tag, attrs, children){
@@ -87,7 +85,7 @@ function heatColor(pct){
 }
 
 /* ---------- estado de filtros globales (cross-filter tipo PowerBI) ---------- */
-const F = {carrera:null, asignatura:null, docente:null, estado:null, horario:null};
+const F = {carrera:null, asignatura:null, docente:null, estado:null};
 function isPrinting(){ return document.body.classList.contains('printing-carrera'); }
 
 function rowMatches(r, exclude){
@@ -95,7 +93,6 @@ function rowMatches(r, exclude){
   if(!exclude.has('asignatura') && F.asignatura!=null && r[R.ASIG]!==F.asignatura) return false;
   if(!exclude.has('docente') && F.docente!=null && r[R.DOC]!==F.docente) return false;
   if(!exclude.has('estado') && F.estado!=null && r[R.ESTADO]!==F.estado) return false;
-  if(!exclude.has('horario') && F.horario!=null && r[R.HORARIO]!==F.horario) return false;
   return true;
 }
 const NO_EXCLUDE = new Set();
@@ -156,9 +153,8 @@ function computeKpis(rows){
   sm.forEach(s=>{ if(s.rindio) rindioEst++; if(s.allAp) totalAp++; });
   const cercaAprobar = rows.filter(r=>(r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO) && r[R.NOTA]>=60 && r[R.NOTA]<70).length;
   const evaluados = agg.aprobado+agg.reprobado;
-  const foraHorario = rows.filter(r=>(r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO) && r[R.HORARIO]===HOR.FUERA).length;
   return {
-    stats, totalEst, rindioEst, totalAp, sinRendicion: totalEst-rindioEst, cercaAprobar, evaluados, foraHorario,
+    stats, totalEst, rindioEst, totalAp, sinRendicion: totalEst-rindioEst, cercaAprobar, evaluados,
     nCarreras: new Set(rows.map(r=>r[R.CARRERA])).size,
     nAsignaturas: new Set(rows.map(r=>r[R.ASIG])).size,
     nDocentes: new Set(rows.map(r=>r[R.DOC])).size,
@@ -187,7 +183,6 @@ const FILTER_LABELS = {
   asignatura: v=>'Asignatura: '+DATA.dict.asignatura[v],
   docente: v=>'Docente: '+DATA.dict.docente[v],
   estado: v=>'Estado: '+DATA.dict.estado[v],
-  horario: v=>'Horario: '+DATA.dict.horario[v],
 };
 function renderFilterBar(){
   filterBarEl.innerHTML = '';

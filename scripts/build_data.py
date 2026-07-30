@@ -1,37 +1,46 @@
 """
-Regenera js/data.js a partir de data/curso_nivelacion_1S2026.csv.
+Regenera js/data.js a partir de data/curso_nivelacion_1S2026_sga.xlsx.
 
 Uso:
     python scripts/build_data.py
 
-Requiere: pandas (pip install pandas)
+Requiere: pandas, openpyxl (pip install pandas openpyxl)
 
-Lee el CSV de resultados de Nivelacion (nivel estudiante-curso) y escribe
-un unico archivo JS con "const DATA = {...};" que el dashboard carga
-directamente (sin fetch, para que funcione abriendo index.html sin
-necesidad de un servidor local).
+Lee el Excel de resultados oficiales del SGA (Sistema de Gestion Academica,
+nivel estudiante-asignatura) y escribe un unico archivo JS con
+"const DATA = {...};" que el dashboard carga directamente (sin fetch, para
+que funcione abriendo index.html sin necesidad de un servidor local).
 
-Identidad de estudiante: se usa la columna `id_estudiante` (no `cedula`) para
-agrupar filas de un mismo estudiante. La cedula viene vacia en ~52 filas
-(estudiantes reales sin cedula registrada), y usar cedula ahi colapsaba a
-estudiantes distintos en un solo "bucket" compartido, lo que subcontaba
-inscritos y, cuando dos de esos estudiantes compartian el mismo curso,
-fusionaba 2 matriculas reales en 1. `id_estudiante` no tiene nulos y es
-1-a-1 con la cedula quando esta existe, asi que agrupando por
-(id_estudiante, curso) da exactamente 39.186 matriculas = filas (sin
-colisiones), cifra que debe coincidir con cualquier otro sistema que
-tambien use id_estudiante como llave.
+Por que SGA y no Moodle (fuente anterior, ver git log de este archivo): las
+notas de Moodle quedaron desactualizadas para estudiantes a quienes se les
+ayudo a subir la nota despues del examen (ej. cedula 0957410301: Fisica
+68->70 y Matematicas 62->70, ambas de REPROBADO a APROBADO). El SGA es el
+sistema academico oficial y refleja esos ajustes; Moodle no. Por eso el
+dashboard se reestructuro para tomar el SGA como unica fuente de verdad
+(2026-07-30).
+
+Identidad de estudiante: se usa `id_estudiante` (no `cedula`) para agrupar
+filas de un mismo estudiante - no tiene nulos y es 1-a-1 con la cedula
+cuando esta existe. OJO: `id_estudiante` es un ID interno de cada sistema;
+los valores de esta columna en el SGA NO corresponden a los mismos IDs que
+tenia el CSV de Moodle (son numeraciones internas distintas) - si se
+necesita cruzar ambas fuentes hay que usar `cedula`, no `id_estudiante`.
+
+El SGA no trae "curso" (paralelo/seccion) ni "cumplimiento_horario" que si
+traia el CSV de Moodle. El horario nunca se exponia en ninguna tarjeta o
+filtro del dashboard (se verifico buscando usos de F.horario), asi que se
+elimino del modelo de datos y de js/app.js en vez de simularlo con un valor
+constante.
 """
 import json
-import re
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-CSV = ROOT / "data" / "curso_nivelacion_1S2026.csv"
+XLSX = ROOT / "data" / "curso_nivelacion_1S2026_sga.xlsx"
 OUT = ROOT / "js" / "data.js"
 
 LOWER_WORDS = {"de", "del", "la", "las", "el", "los", "y", "en", "a", "al", "con", "por", "para"}
@@ -150,7 +159,7 @@ def r1(x):
 
 
 def main():
-    df = pd.read_csv(CSV, encoding="utf-8-sig")
+    df = pd.read_excel(XLSX, sheet_name="Hoja1")
 
     # --- normalizacion de texto: fija tildes inconsistentes (mojibake) y
     # fusiona variantes de una misma carrera (p.ej. "NIVELACION EDUCACION"
@@ -192,27 +201,20 @@ def main():
     docente_index = {k: i for i, k in enumerate(docente_keys)}
     docente_dict = [docente_label(k) for k in docente_keys]
 
-    ESTADO = ["APROBADO", "REPROBADO", "NO REALIZO EXAMEN FINAL"]
+    ESTADO = ["APROBADO", "REPROBADO", "EN CURSO"]
     estado_index = {v: i for i, v in enumerate(ESTADO)}
     estado_dict = ["Aprobado", "Reprobado", "No realizó examen"]
-
-    HORARIO = ["Dentro de horario", "Fuera de horario", "No aplica"]
-    horario_index = {v: i for i, v in enumerate(HORARIO)}
-    horario_dict = ["Dentro de horario", "Fuera de horario", "No aplica"]
-
-    df["examen_final_num"] = pd.to_numeric(df["examen_final"], errors="coerce")
 
     rows = []
     for r in df.itertuples(index=False):
         c_idx = carrera_index[r.carrera_key]
         a_idx = asignatura_index[r.asignatura_key]
         d_idx = docente_index[r.docente_key]
-        e_idx = estado_index[r.estado_academico]
-        h_idx = horario_index[r.cumplimiento_horario]
-        test_prom = r1((r.test1 + r.test2 + r.test3 + r.test4) / 4.0)
-        examen = r1(r.examen_final_num) if pd.notna(r.examen_final_num) else None
+        e_idx = estado_index[r.estado_materia]
+        test_prom = r1((r.n1 + r.n2 + r.n3 + r.n4) / 4.0)
+        examen = r1(r.ex)
         nota = r1(r.nota_final)
-        rows.append([r.student_idx, c_idx, a_idx, d_idx, e_idx, h_idx, nota, test_prom, examen])
+        rows.append([r.student_idx, c_idx, a_idx, d_idx, e_idx, nota, test_prom, examen])
 
     data = {
         "meta": {
@@ -227,9 +229,8 @@ def main():
             "asignatura": asignatura_dict,
             "docente": docente_dict,
             "estado": estado_dict,
-            "horario": horario_dict,
         },
-        # fila: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, horarioIdx, notaFinal, testProm, examenFinal]
+        # fila: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
         "rows": rows,
     }
 

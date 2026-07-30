@@ -28,21 +28,24 @@ reprobación). Al elegir una: KPIs de esa carrera, mapa de calor de asignaturas,
 por combinación asignatura + docente, y distribución de la nota final.
 
 **Cross-filtering**: cualquier fila u celda clicable actúa como filtro global (carrera,
-asignatura, docente, estado, horario). Los filtros activos aparecen como chips debajo de las
+asignatura, docente, estado). Los filtros activos aparecen como chips debajo de las
 pestañas y se quitan individualmente o todos a la vez.
+
+## Fuente de datos
+
+Los datos vienen del **SGA** (Sistema de Gestión Académica), no de Moodle. Moodle guarda la nota
+tal como quedó en el examen, pero a algunos estudiantes se les ayudó después a subir la nota para
+que aprueben; esa corrección solo queda reflejada en el SGA. Por eso el SGA es la fuente de verdad
+del dashboard.
 
 ## Metodología de los cálculos
 
-Verificada contra el Informe Técnico ITI-DIPA-NVERAV-2026-004 hasta reproducir sus cifras exactas
-(13.266 inscritos, 11.299 rindieron, 39.184 matrículas-curso, 84,80% rindió, 59,67% / 40,33%
-aprobado/reprobado, 1.967 sin ninguna rendición):
-
-- `% Rindió Examen` = estudiantes-curso con `numero_intento > 0` / total de estudiantes-curso.
+- `% Rindió Examen` = estudiantes-curso con estado `Aprobado` o `Reprobado` / total de
+  estudiantes-curso (el resto quedó en curso, sin rendir el examen final).
 - `% Aprobado` / `% Reprobado` = sobre estudiantes-curso que rindieron (no sobre el total).
-- Las filas del CSV con cédula vacía se agrupan como **un único** estudiante compartido (no se
-  ignoran ni se cuentan como estudiantes distintos) — así es como lo calcula el dashboard
-  institucional de origen; ver el docstring de `scripts/build_data.py` para el detalle.
-- Los nombres de carrera y asignatura del CSV traían tildes inconsistentes/perdidas; se
+- Identidad de estudiante: se usa `id_estudiante` (no la cédula) para agrupar filas de un mismo
+  estudiante; ver el docstring de `scripts/build_data.py` para el detalle.
+- Los nombres de carrera y asignatura de origen traían tildes inconsistentes/perdidas; se
   normalizan y corrigen con la ortografía oficial del informe (`CARRERA_FIX` / `ASIGNATURA_FIX`
   en `scripts/build_data.py`).
 
