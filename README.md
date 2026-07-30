@@ -1,6 +1,6 @@
 # Dashboard Académico — Monitoreo Exámenes de Nivelación
 
-Dashboard interactivo de resultados del Curso de Nivelación (2S2026), con vista general y vista
+Dashboard interactivo de resultados del Curso de Nivelación (1S2026), con vista general y vista
 por carrera, 100% cross-filtrado (clic en cualquier gráfico filtra todo el dashboard). Construido
 en HTML/CSS/JS vanilla, sin librerías ni build step, con la paleta institucional UNEMI.
 

@@ -1,5 +1,5 @@
 """
-Regenera js/data.js a partir de data/curso_nivelacion_2S2026.csv.
+Regenera js/data.js a partir de data/curso_nivelacion_1S2026.csv.
 
 Uso:
     python scripts/build_data.py
@@ -28,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-CSV = ROOT / "data" / "curso_nivelacion_2S2026.csv"
+CSV = ROOT / "data" / "curso_nivelacion_1S2026.csv"
 OUT = ROOT / "js" / "data.js"
 
 LOWER_WORDS = {"de", "del", "la", "las", "el", "los", "y", "en", "a", "al", "con", "por", "para"}
