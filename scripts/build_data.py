@@ -11,13 +11,16 @@ un unico archivo JS con "const DATA = {...};" que el dashboard carga
 directamente (sin fetch, para que funcione abriendo index.html sin
 necesidad de un servidor local).
 
-Metodologia verificada contra el Informe Tecnico ITI-DIPA-NVERAV-2026-004
-(y el dashboard institucional del que parte ese informe):
-  - COUNT(DISTINCT cedula) trata las cedulas vacias/nulas como UN solo
-    valor compartido (no como NULL ignorado ni como estudiantes distintos).
-    Con esa regla se reproduce exactamente 13.266 inscritos / 11.299
-    rindieron / 1.967 sin ninguna rendicion / 39.184 matriculas-curso que
-    reporta el informe oficial.
+Identidad de estudiante: se usa la columna `id_estudiante` (no `cedula`) para
+agrupar filas de un mismo estudiante. La cedula viene vacia en ~52 filas
+(estudiantes reales sin cedula registrada), y usar cedula ahi colapsaba a
+estudiantes distintos en un solo "bucket" compartido, lo que subcontaba
+inscritos y, cuando dos de esos estudiantes compartian el mismo curso,
+fusionaba 2 matriculas reales en 1. `id_estudiante` no tiene nulos y es
+1-a-1 con la cedula quando esta existe, asi que agrupando por
+(id_estudiante, curso) da exactamente 39.186 matriculas = filas (sin
+colisiones), cifra que debe coincidir con cualquier otro sistema que
+tambien use id_estudiante como llave.
 """
 import json
 import re
@@ -156,15 +159,14 @@ def main():
     df["asignatura_key"] = df["asignatura"].apply(norm_key)
     df["docente_key"] = df["docente"].apply(lambda s: " ".join(str(s).split()))
 
-    # cedula: '' comparte un unico bucket para las 52 filas sin cedula,
-    # replicando la metodologia del dashboard institucional (ver docstring)
-    cedula_str = df["cedula"].apply(lambda v: "" if pd.isna(v) else str(int(v)))
+    # id_estudiante identifica a cada estudiante de forma unica (sin nulos,
+    # 1-a-1 con cedula cuando esta existe) - ver docstring
     student_ids = {}
     student_idx = []
-    for c in cedula_str:
-        if c not in student_ids:
-            student_ids[c] = len(student_ids)
-        student_idx.append(student_ids[c])
+    for sid in df["id_estudiante"]:
+        if sid not in student_ids:
+            student_ids[sid] = len(student_ids)
+        student_idx.append(student_ids[sid])
     df["student_idx"] = student_idx
 
     # --- diccionarios ---
@@ -238,7 +240,7 @@ def main():
         f.write(";\n")
 
     print(f"Escrito {OUT}")
-    print(f"  {len(rows)} filas estudiante-curso, {len(student_ids)} estudiantes (incl. bucket sin cedula)")
+    print(f"  {len(rows)} filas estudiante-curso, {len(student_ids)} estudiantes")
     print(f"  {len(carrera_dict)} carreras, {len(asignatura_dict)} asignaturas, {len(docente_dict)} docentes")
     areas = Counter(carrera_area)
     for a, n in areas.most_common():
