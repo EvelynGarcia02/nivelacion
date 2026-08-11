@@ -263,4 +263,15 @@ table.heatmap td:first-child{border-bottom:none;padding:8px 6px;}
   body.printing-carrera table.datatable tr, body.printing-carrera table.heatmap tr{ break-inside:avoid; }
 
   body.printing-carrera .sel-search, body.printing-carrera .dropdown-menu, body.printing-carrera .pdf-btn{ display:none !important; }
+
+  /* El tema oscuro pinta estos textos con un color:#fff escrito a mano, no con
+     una variable, asi que forzar la paleta clara arriba no alcanza: al imprimir
+     desde un navegador en modo oscuro salian en blanco sobre blanco (titulos de
+     tarjeta, valores de KPI y numeros de los callout, invisibles en el PDF).
+     Hay que revertirlos uno por uno. */
+  body.printing-carrera .kpi .value,
+  body.printing-carrera .card h2,
+  body.printing-carrera .callout .big,
+  body.printing-carrera .print-header .ph-titles h1{ color:var(--brand-navy-900); }
+  body.printing-carrera .kpi.accent .value{ color:var(--brand-orange-600); }
 }
