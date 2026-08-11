@@ -38,34 +38,29 @@ tal como quedó en el examen, pero a algunos estudiantes se les ayudó después 
 que aprueben; esa corrección solo queda reflejada en el SGA. Por eso el SGA es la fuente de verdad
 del dashboard.
 
-`js/data.js` se arma combinando dos cosas (`python scripts/build_data.py`):
+`js/data.js` se genera con `python scripts/build_data.py`, que lee los reportes del SGA que estén
+en `data/curso_niv_1S2026_sga*.xlsx` (o `.csv`) — salida de la query `est_cal_sga_niv_grado.sql`.
+Hoy es un único archivo con **las 38 carreras y las actas ya cerradas** (corte del 11/08/2026).
 
-1. **Corte base al 30/07/2026** (`data/base_sga_1S2026.js`, también en git en el commit `ebe1316`):
-   el reporte del SGA de las 38 carreras cuando el periodo todavía estaba abierto, con exámenes
-   rendidos y aún sin calificar.
-2. **Reportes con el periodo cerrado** (`data/curso_niv_1S2026_sga*.csv`, query
-   `est_cal_sga_niv_grado.sql`): cada carrera que aparezca en uno de estos CSV reemplaza por
-   completo a esa carrera del corte base. Hoy cubren 11 de las 38 carreras (Medicina, Multimedia,
-   las tres Pedagogías, Psicología Clínica, Software, TICs en Línea, Trabajo Social presencial y
-   en línea, y Turismo en Línea).
-
-Para actualizar las 27 carreras restantes basta con correr la misma query cambiando la lista de
-`carr.id`, dejar el CSV en `data/` con el mismo prefijo y volver a correr el script: no hay que
-tocar código. De qué reporte salió cada carrera queda registrado en `meta.fuentes` /
-`dict.carreraFuente` de `js/data.js` (solo como trazabilidad; el dashboard no lo muestra).
+El script acepta varios archivos a la vez, así que también sirve un export partido por grupos de
+carreras: cada carrera se toma del reporte donde aparezca. Si alguna carrera no viene en ningún
+reporte, se la rescata del respaldo `data/base_sga_1S2026.js` (snapshot del 30/07/2026, también en
+git en el commit `ebe1316`) y el script lo avisa por consola nombrando las carreras afectadas — así
+un export parcial nunca borra carreras en silencio. De qué reporte salió cada una queda registrado
+en `meta.fuentes` / `dict.carreraFuente` de `js/data.js` (solo trazabilidad; el dashboard no lo
+muestra).
 
 ## Metodología de los cálculos
 
 - `% Rindió Examen` = estudiantes-curso con estado `Aprobado` o `Reprobado` / total de
   estudiantes-curso (el resto quedó sin rendir el examen final).
-- **"No realizó examen"**: en el corte base es el estado `EN CURSO` del SGA. Con el periodo ya
-  cerrado el SGA no usa más ese estado y deja como `REPROBADO` al que no se presentó, así que en
-  los reportes nuevos esas filas se reconocen por `ex = 0`. La equivalencia se verificó contra el
-  corte base: las 32.926 filas ya calificadas tienen `ex > 0` y las 5.731 `EN CURSO` tienen todas
-  `ex = 0`; además, entre las filas nuevas con `ex = 0` la nota final máxima es 40, o sea solo
-  puntos de test. Se los mantiene como tercer estado (y fuera del denominador de `% Aprobado`)
-  para que las carreras actualizadas sigan siendo comparables con las que no lo están. Ojo que
-  para el SGA esas matrículas son reprobadas.
+- **"No realizó examen"**: el SGA marcaba con `EN CURSO` a quien no tenía el examen calificado,
+  pero al cerrar el periodo deja como `REPROBADO` al que no se presentó, así que el estado ya no
+  distingue "no rindió" de "rindió y reprobó". La marca estable es `ex = 0`: se verificó contra el
+  corte del 30/07 que las 32.926 filas calificadas tienen `ex > 0` y las 5.731 `EN CURSO` tienen
+  todas `ex = 0`, y en el export del 11/08 la nota final máxima entre las filas con `ex = 0` es 40,
+  o sea solo puntos de test. Por eso se reconstruye el tercer estado con `ex = 0`, dejándolo fuera
+  del denominador de `% Aprobado`. Ojo que para el SGA esas matrículas son reprobadas.
 - `% Aprobado` / `% Reprobado` = sobre estudiantes-curso que rindieron (no sobre el total).
 - Identidad de estudiante: se usa `id_estudiante` (no la cédula) para agrupar filas de un mismo
   estudiante; ver el docstring de `scripts/build_data.py` para el detalle.

@@ -1,25 +1,24 @@
 """
-Regenera js/data.js combinando el corte base del SGA con los reportes nuevos.
+Regenera js/data.js a partir de los reportes del SGA.
 
 Uso:
     python scripts/build_data.py
 
-Requiere: pandas (pip install pandas)
+Requiere: pandas y openpyxl (pip install pandas openpyxl)
 
 FUENTES
 -------
-1. Base: data/base_sga_1S2026.js -- snapshot del js/data.js generado el
-   2026-07-30 desde el Excel del SGA (38 carreras). Es un insumo, no una
-   salida: si no existe, la primera corrida lo crea copiando el js/data.js
-   vigente (y el archivo tambien esta en git, commit ebe1316). Gracias a
-   esto el script es determinista: siempre parte del mismo base, sin
-   importar cuantas veces se corra.
-2. Reportes nuevos: data/curso_niv_1S2026_sga*.csv -- exportes del SGA con
-   el periodo ya cerrado (query est_cal_sga_niv_grado.sql). Cada CSV trae
-   un subconjunto de carreras; TODA carrera presente en un CSV reemplaza
-   por completo a esa carrera en el base. Para actualizar el resto de las
-   carreras basta con dejar mas CSVs en data/ con el mismo prefijo y volver
-   a correr: no hay que tocar este script.
+1. Reportes del SGA: data/curso_niv_1S2026_sga*.xlsx (o .csv) -- salida de la
+   query est_cal_sga_niv_grado.sql. Puede ser un unico archivo con las 38
+   carreras o varios archivos parciales: se leen todos los que matcheen el
+   patron y cada carrera que aparezca en alguno se toma de ahi. Para
+   actualizar datos basta con reemplazar/agregar archivos en data/ y volver a
+   correr; no hay que tocar este script.
+2. Base (respaldo): data/base_sga_1S2026.js -- snapshot del js/data.js del
+   2026-07-30, tambien en git (commit ebe1316). Solo aporta las carreras que
+   NO aparezcan en ningun reporte, para no perderlas si alguna vez se corre
+   con un export parcial. Con el export completo del 11/08/2026 no aporta
+   ninguna fila y el dashboard queda 100% con actas cerradas.
 
 POR QUE SGA Y NO MOODLE (fuente anterior, ver git log de este archivo): las
 notas de Moodle quedaron desactualizadas para estudiantes a quienes se les
@@ -27,18 +26,17 @@ ayudo a subir la nota despues del examen (ej. cedula 0957410301: Fisica
 68->70 y Matematicas 62->70, ambas de REPROBADO a APROBADO). El SGA es el
 sistema academico oficial y refleja esos ajustes; Moodle no.
 
-"NO REALIZO EXAMEN" EN LOS REPORTES NUEVOS: el corte base traia el estado
-`EN CURSO` para el estudiante-curso que todavia no tenia el examen
-calificado. Ya cerrado el periodo, el SGA no usa mas ese estado: al que no
-se presento lo deja como REPROBADO con ex = 0. Se verifico contra el corte
-base que en el SGA `ex = 0` equivale exactamente a no haberse presentado
-(las 32.926 filas calificadas tienen ex > 0 y las 5.731 `EN CURSO` tienen
-todas ex = 0; ademas, entre las filas nuevas con ex = 0 la nota final
-maxima es 40, o sea solo puntos de test). Por eso aca se reconstruye el
-tercer estado con la regla `ex == 0 -> No realizo examen`, que mantiene
-comparables "% Rindio examen" y "% Aprobado sobre quienes rindieron" entre
-carreras actualizadas y no actualizadas. OJO: para el SGA esas filas son
-reprobadas; el dashboard las cuenta aparte a proposito.
+"NO REALIZO EXAMEN": el SGA marcaba con `EN CURSO` al estudiante-curso sin
+examen calificado, pero al cerrar el periodo deja como REPROBADO al que no
+se presento. O sea que el estado ya no distingue "no rindio" de "rindio y
+reprobo". La marca estable es `ex = 0`: se verifico contra el corte del
+30/07 que las 32.926 filas calificadas tienen ex > 0 y las 5.731 `EN CURSO`
+tienen todas ex = 0, y en el export del 11/08 la nota final maxima entre las
+filas con ex = 0 es 40, o sea solo puntos de test. Por eso el tercer estado
+del dashboard se reconstruye con `ex == 0 -> No realizo examen`, que es lo
+que mantiene vivos el "% Rindio examen" y el "% Aprobado sobre quienes
+rindieron". OJO: para el SGA esas matriculas son reprobadas; el dashboard
+las cuenta aparte a proposito.
 
 IDENTIDAD DE ESTUDIANTE: se usa `id_estudiante` (no `cedula`) -- no tiene
 nulos y es 1-a-1 con la cedula cuando esta existe. OJO: `id_estudiante` es
@@ -46,15 +44,12 @@ un ID interno de cada sistema; los valores del SGA NO son los mismos IDs
 que traia el CSV de Moodle (numeraciones internas distintas) - para cruzar
 ambas fuentes hay que usar `cedula`.
 
-El base ya perdio los IDs (guarda indices anonimos), asi que para no contar
-dos veces al estudiante que cursa una carrera actualizada y otra que no (4
-casos), se reidentifica al estudiante entre base y CSV por su firma:
-el conjunto de (carrera, asignatura, docente, promedio de test) de sus
-filas. Los test son previos al examen, o sea que no cambian entre cortes.
+El base ya perdio los IDs (guarda indices anonimos), asi que cuando aporta
+filas se reidentifica al estudiante entre base y reporte por su firma: el
+conjunto de (carrera, asignatura, docente, promedio de test) de sus filas.
+Los test son previos al examen, o sea que no cambian entre cortes.
 """
 import json
-import re
-import shutil
 import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -64,11 +59,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 BASE = DATA / "base_sga_1S2026.js"
-CSV_GLOB = "curso_niv_1S2026_sga*.csv"
+SRC_GLOB = "curso_niv_1S2026_sga*"          # .xlsx o .csv
+SRC_SUFFIXES = {".xlsx", ".xls", ".csv"}
 OUT = ROOT / "js" / "data.js"
 
-# Fecha del corte de cada fuente, para poder advertir en el dashboard que
-# conviven dos vintages de datos mientras no se actualicen todas las carreras.
+# Fecha del reporte del que sale cada carrera; queda en meta.fuentes de
+# js/data.js solo como trazabilidad (el dashboard no la muestra).
 CORTE_BASE = "2026-07-30"
 CORTE_NUEVO = "2026-08-11"
 
@@ -208,20 +204,29 @@ def load_js_data(path):
     return json.loads(txt[start:end])
 
 
-def ensure_base():
-    """El base es un insumo fijo; se crea una sola vez desde el data.js previo."""
-    if BASE.exists():
-        return
-    if not OUT.exists():
-        raise SystemExit(f"Falta {BASE} y no hay {OUT} para derivarlo (recuperalo de git: commit ebe1316).")
-    prev = load_js_data(OUT)
-    if "fuentes" in prev.get("meta", {}):
-        raise SystemExit(
-            f"Falta {BASE} y el {OUT} actual ya es una salida combinada de este script, "
-            "asi que no sirve de base. Recuperalo de git: git show ebe1316:js/data.js > data/base_sga_1S2026.js"
-        )
-    shutil.copyfile(OUT, BASE)
-    print(f"Base creado desde {OUT.name}: {BASE}")
+def read_source(path):
+    """Lee un reporte del SGA, sea Excel o CSV."""
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path, encoding="utf-8-sig")
+    return pd.read_excel(path, sheet_name=0)
+
+
+EMPTY_BASE = {
+    "dict": {"carrera": [], "carreraModalidad": [], "asignatura": [], "docente": [],
+             "estado": ESTADO_LABELS},
+    "rows": [],
+}
+
+
+def load_base():
+    """Respaldo opcional: solo aporta carreras ausentes de los reportes.
+
+    Con un export completo del SGA no hace falta, asi que si no esta se sigue
+    igual (para recuperarlo: git show ebe1316:js/data.js > data/base_sga_1S2026.js).
+    """
+    if not BASE.exists():
+        return EMPTY_BASE
+    return load_js_data(BASE)
 
 
 class Registry:
@@ -236,16 +241,16 @@ class Registry:
 
 
 def main():
-    ensure_base()
-    base = load_js_data(BASE)
-    csvs = sorted(DATA.glob(CSV_GLOB))
-    if not csvs:
-        raise SystemExit(f"No hay reportes nuevos ({DATA}/{CSV_GLOB})")
+    base = load_base()
+    sources = sorted(p for p in DATA.glob(SRC_GLOB)
+                     if p.suffix.lower() in SRC_SUFFIXES and not p.name.startswith("~$"))
+    if not sources:
+        raise SystemExit(f"No hay reportes del SGA ({DATA}/{SRC_GLOB} con extension {sorted(SRC_SUFFIXES)})")
 
-    # ---------- 1. reportes nuevos ----------
+    # ---------- 1. reportes del SGA ----------
     frames = []
-    for path in csvs:
-        df = pd.read_csv(path, encoding="utf-8-sig")
+    for path in sources:
+        df = read_source(path)
         df["_archivo"] = path.name
         frames.append(df)
     new = pd.concat(frames, ignore_index=True)
@@ -336,15 +341,19 @@ def main():
 
     # ---------- 5. filas nuevas ----------
     fresh = []
-    ex0_reprobado = 0
+    no_rindio = Counter()
     for t in new.itertuples(index=False):
+        est_raw = norm_key(t.estado_materia)
         if t.ex == 0:
-            # periodo cerrado: el SGA marca REPROBADO al que no se presento; el
-            # dashboard lo separa como "No realizo examen" (ver docstring)
+            # No se presento al examen: el SGA lo deja como REPROBADO al cerrar el
+            # periodo (y como EN CURSO si todavia no lo cerro). El dashboard lo
+            # separa en su propio estado -- ver docstring.
             estado = NORINDIO
-            ex0_reprobado += 1
+            no_rindio[est_raw] += 1
+        elif est_raw == "EN CURSO":
+            raise SystemExit(f"Fila EN CURSO con ex={t.ex} (se esperaba ex=0): {t.carrera} / {t.asignatura}")
         else:
-            estado = AP if norm_key(t.estado_materia) == "APROBADO" else REP
+            estado = AP if est_raw == "APROBADO" else REP
         fresh.append([
             id_to_sid[t.id_estudiante], c_idx[t.ck], a_idx[t.ak], d_idx[t.dk], estado,
             r1(t.nota_final), r1((t.n1 + t.n2 + t.n3 + t.n4) / 4.0), r1(t.ex),
@@ -359,25 +368,32 @@ def main():
         r[0] = remap[r[0]]
 
     # Trazabilidad de que reporte del SGA salio cada carrera. No se muestra en el
-    # dashboard (las actas ya estan subidas): sirve para saber que hay que
-    # reexportar cuando se quiera refrescar una carrera.
-    fuentes = [
+    # dashboard: sirve para saber que hay que reexportar cuando se quiera
+    # refrescar una carrera. Si el base no aporto ninguna carrera queda una sola
+    # fuente, o sea que todo el dashboard salio del mismo reporte.
+    FUENTES_POSIBLES = [
         {"fecha": CORTE_BASE, "etiqueta": "Reporte SGA del 30/07/2026"},
-        {"fecha": CORTE_NUEVO, "etiqueta": "Reporte SGA del 11/08/2026"},
+        {"fecha": CORTE_NUEVO, "etiqueta": "Reporte SGA del 11/08/2026",
+         "archivos": [p.name for p in sources]},
     ]
+    usadas = sorted({fuente[k] for k in carrera_keys})
+    fmap = {f: i for i, f in enumerate(usadas)}
+    fuentes = [FUENTES_POSIBLES[f] for f in usadas]
+    carrera_fuente = [fmap[fuente[k]] for k in carrera_keys]
+
     data = {
         "meta": {
             "generated": pd.Timestamp.now().strftime("%Y-%m-%d"),
             "totalRows": len(rows),
             "totalStudents": len(remap),
             "fuentes": fuentes,
-            "carrerasPorFuente": [sum(1 for k in carrera_keys if fuente[k] == i) for i in range(len(fuentes))],
+            "carrerasPorFuente": [carrera_fuente.count(i) for i in range(len(fuentes))],
         },
         "dict": {
             "carrera": [carreras.label[k] for k in carrera_keys],
             "carreraModalidad": [modalidad[k] for k in carrera_keys],
             "carreraArea": [area_for(k) for k in carrera_keys],
-            "carreraFuente": [fuente[k] for k in carrera_keys],
+            "carreraFuente": carrera_fuente,
             "asignatura": [asignaturas.label[k] for k in asignatura_keys],
             "docente": [docentes.label[k] for k in docente_keys],
             "estado": ESTADO_LABELS,
@@ -394,14 +410,20 @@ def main():
 
     # ---------- 7. resumen ----------
     print(f"Escrito {OUT}")
-    print(f"  CSV nuevos: {', '.join(p.name for p in csvs)}")
-    print(f"  {len(rows)} filas estudiante-curso, {len(remap)} estudiantes")
-    print(f"  {len(carrera_keys)} carreras ({data['meta']['carrerasPorFuente'][1]} actualizadas, "
-          f"{data['meta']['carrerasPorFuente'][0]} en el corte base), "
-          f"{len(asignatura_keys)} asignaturas, {len(docente_keys)} docentes")
-    print(f"  reidentificados por firma: {len(new_rows_by_id) - sin_match}/{len(new_rows_by_id)} estudiantes"
-          f"{'' if not sin_match else f' ({sin_match} sin match, cuentan como nuevos)'}")
-    print(f"  filas nuevas con ex=0 reclasificadas a 'No realizó examen': {ex0_reprobado}")
+    print(f"  reportes: {', '.join(p.name for p in sources)}")
+    print(f"  {len(rows)} filas estudiante-curso ({len(fresh)} de los reportes, {len(kept)} del base), "
+          f"{len(remap)} estudiantes")
+    print(f"  {len(carrera_keys)} carreras, {len(asignatura_keys)} asignaturas, {len(docente_keys)} docentes")
+    if len(kept):
+        faltan = [carreras.label[k] for k in carrera_keys if fuente[k] == 0]
+        print(f"  AVISO: {len(faltan)} carreras no vienen en los reportes y se toman del base "
+              f"({CORTE_BASE}): {', '.join(faltan)}")
+        print(f"  reidentificados por firma: {len(new_rows_by_id) - sin_match}/{len(new_rows_by_id)} estudiantes"
+              f"{'' if not sin_match else f' ({sin_match} sin match, cuentan como nuevos)'}")
+    else:
+        print(f"  todas las carreras salen de los reportes del {CORTE_NUEVO} (el base no aporta filas)")
+    detalle = ", ".join(f"{n} venian como {e}" for e, n in no_rindio.most_common())
+    print(f"  filas con ex=0 contadas como 'No realizó examen': {sum(no_rindio.values())} ({detalle})")
     est_count = Counter(r[4] for r in rows)
     for i, lab in enumerate(ESTADO_LABELS):
         print(f"    {lab}: {est_count[i]} ({est_count[i] / len(rows) * 100:.2f}%)")
