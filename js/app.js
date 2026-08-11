@@ -285,7 +285,11 @@ function heatmap3Card(opts){
   const tableWrap = el('div',{class:'table-scroll'});
   const table = el('table',{class:'datatable heatmap'});
   const headLabel = opts.headLabel || (opts.dim==='carrera'?'Carrera':'Asignatura');
-  const heads = [el('th',null,headLabel), el('th',null,'% Aprobado'), el('th',null,'% Reprobado'), el('th',null,'% En curso')];
+  // la columna "En curso" solo se muestra donde hay algo sin cerrar: si no,
+  // sería una columna entera de 0,00% y los otros dos ya suman 100%
+  const hayEncurso = list.some(x=>x.encurso>0);
+  const heads = [el('th',null,headLabel), el('th',null,'% Aprobado'), el('th',null,'% Reprobado')];
+  if(hayEncurso) heads.push(el('th',null,'% En curso'));
   if(opts.conRindio) heads.splice(1, 0, el('th',null,'% Rindió'));
   table.appendChild(el('tr',null,heads));
   list.forEach(x=>{
@@ -297,7 +301,7 @@ function heatmap3Card(opts){
     if(opts.conRindio) tr.appendChild(cell(x, x.pctRindio, x.rindio, x.total, 'se presentaron al examen'));
     tr.appendChild(cell(x, x.pctAprobado, x.aprobado, x.total, 'aprobaron'));
     tr.appendChild(cell(x, x.pctReprobado, x.reprobado, x.total, 'reprobaron'));
-    tr.appendChild(cell(x, x.pctEncurso, x.encurso, x.total, 'sin calificaciones cerradas'));
+    if(hayEncurso) tr.appendChild(cell(x, x.pctEncurso, x.encurso, x.total, 'sin calificaciones cerradas'));
     table.appendChild(tr);
   });
   tableWrap.appendChild(table);
@@ -505,13 +509,13 @@ function renderGlobal(){
   const rankGrid = el('div',{class:'grid-2'});
   rankGrid.appendChild(heatmap3Card({
     title:'Resultado por Carrera', iconName:'grid', dim:'carrera', labelFn:i=>DATA.dict.carrera[i],
-    caption:'Los tres estados se reparten sobre el total de matrículas de la carrera y suman 100%. Ordenado por % de reprobación. Pasá el cursor sobre el nombre de la carrera para ver su modalidad. Clic para filtrar todo el dashboard.',
+    caption:'Los estados se reparten sobre el total de matrículas de la carrera y suman 100%; la columna "% En curso" aparece solo donde hay calificaciones sin cerrar. Ordenado por % de reprobación. Pasá el cursor sobre el nombre de la carrera para ver su modalidad. Clic para filtrar todo el dashboard.',
     rows: filteredRows(new Set(['carrera'])),
     extraInfoFn: i=>DATA.dict.carreraModalidad[i],
   }));
   rankGrid.appendChild(heatmap3Card({
     title:'Resultado por Asignatura', iconName:'grid', dim:'asignatura', labelFn:i=>DATA.dict.asignatura[i],
-    caption:'Los tres estados se reparten sobre el total de matrículas de la asignatura y suman 100%. Ordenado por % de reprobación. Clic para filtrar todo el dashboard.',
+    caption:'Los estados se reparten sobre el total de matrículas de la asignatura y suman 100%; la columna "% En curso" aparece solo donde hay calificaciones sin cerrar. Ordenado por % de reprobación. Clic para filtrar todo el dashboard.',
     rows: filteredRows(new Set(['asignatura'])),
   }));
   gView.appendChild(rankGrid);
@@ -656,9 +660,14 @@ function detalleParalelosCard(rows){
     list = list.filter(x=>(F.asignatura==null || x.a===F.asignatura) && (F.docente==null || x.d===F.docente));
   }
   if(!list.length){ card.appendChild(el('div',{class:'empty-note'},'Sin datos para esta carrera con el filtro actual.')); return card; }
+  // la columna "En curso" solo aparece si algún docente tiene calificaciones sin
+  // cerrar; cuando aparece, los tres porcentajes cierran en 100%
+  const hayEncurso = list.some(x=>x.encurso>0);
   const tableWrap = el('div',{class:'table-scroll'});
   const table = el('table',{class:'datatable'});
-  table.appendChild(el('tr',null,[el('th',null,'Asignatura'),el('th',null,'Docente'),el('th',null,'N° evaluados'),el('th',null,'% Aprobado'),el('th',null,'% Reprobado')]));
+  const heads = [el('th',null,'Asignatura'),el('th',null,'Docente'),el('th',null,'N° evaluados'),el('th',null,'% Aprobado'),el('th',null,'% Reprobado')];
+  if(hayEncurso) heads.push(el('th',null,'% En curso'));
+  table.appendChild(el('tr',null,heads));
   list.forEach(x=>{
     const isSel = F.asignatura===x.a && F.docente===x.d;
     const tr = el('tr',{class:'clickable'+(isSel?' selected':''), onclick:()=>{
@@ -672,6 +681,8 @@ function detalleParalelosCard(rows){
     tr.appendChild(el('td',null, x.rindio+' / '+x.total));
     tr.appendChild(el('td',null, x.pctAprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(100-x.pctAprobado)}, fmt2(x.pctAprobado)+'%'):'—'));
     tr.appendChild(el('td',null, x.pctReprobado!=null? el('span',{class:'tag', style:'background:'+riskColor(x.pctReprobado)}, fmt2(x.pctReprobado)+'%'):'—'));
+    // color de aviso fijo: "en curso" no es bueno ni malo, es algo pendiente
+    if(hayEncurso) tr.appendChild(el('td',null, x.pctEncurso? el('span',{class:'tag', style:'background:var(--estado-cerca)'}, fmt2(x.pctEncurso)+'%'):'—'));
     table.appendChild(tr);
   });
   tableWrap.appendChild(table);
