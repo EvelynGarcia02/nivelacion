@@ -5,6 +5,10 @@
 const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7};
 const EST = {APROBADO:0, REPROBADO:1, NORINDIO:2};
 
+/* Con las actas ya subidas no se muestra la fecha de corte de cada carrera: el
+   dato de origen (DATA.meta.fuentes / DATA.dict.carreraFuente en js/data.js)
+   queda solo como trazabilidad de que reporte del SGA salio cada carrera. */
+
 /* ---------- helpers genericos ---------- */
 function el(tag, attrs, children){
   const e = document.createElement(tag);
