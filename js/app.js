@@ -1,16 +1,24 @@
 /* Requiere que js/data.js se cargue antes y defina la constante global DATA.
    Fila de DATA.rows: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal,
                        testProm, examenFinal, matriculaIdx]
-   estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen
+   estadoIdx: 0 Aprobado, 1 Reprobado, 2 En curso (el docente no cerró calificaciones)
    matriculaIdx: 0 primera vez que toma la asignatura, 1 segunda, 2 tercera o más
+
+   Los porcentajes de estado son sobre el TOTAL y suman 100%. Que el estudiante se
+   haya presentado o no al examen no es un estado: al ausente el SGA lo reprueba.
+   Eso se mira aparte con examenFinal > 0 (ver rindio()).
 
    R.SID identifica a la INSCRIPCION (persona + carrera), no a la persona: hay
    estudiantes inscritos en dos carreras a la vez, y cada carrera es una cuenta
    aparte. Ver el docstring de scripts/build_data.py. */
 
 const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7, MATRICULA:8};
-const EST = {APROBADO:0, REPROBADO:1, NORINDIO:2};
+const EST = {APROBADO:0, REPROBADO:1, ENCURSO:2};
 const MAT = {PRIMERA:0};
+/* Se presentó al examen final. No define el estado (al ausente el SGA lo
+   reprueba); sirve para el "% Rindió examen" y para no mezclar al que no se
+   presentó con el que rindió y no alcanzó la nota. */
+function rindio(r){ return r[R.EXAMEN]>0; }
 
 /* ---------- helpers genericos ---------- */
 function el(tag, attrs, children){
@@ -115,23 +123,27 @@ function toggleFilter(dim, value){
 function clearFilter(dim){ F[dim]=null; rerender(); }
 
 /* ---------- agregacion ---------- */
-function emptyAgg(){ return {total:0, aprobado:0, reprobado:0, norindio:0, notaSum:0, notaN:0, students:new Set()}; }
+/* Los tres estados se reparten sobre el total y suman 100%. "rindieron" es
+   aparte: cuántos se presentaron al examen (ex > 0), sin importar el estado. */
+function emptyAgg(){ return {total:0, aprobado:0, reprobado:0, encurso:0, rindio:0, notaSum:0, notaN:0, students:new Set()}; }
 function addRow(agg, r){
   agg.total++;
   agg.students.add(r[R.SID]);
-  if(r[R.ESTADO]===EST.APROBADO){ agg.aprobado++; agg.notaSum+=r[R.NOTA]; agg.notaN++; }
-  else if(r[R.ESTADO]===EST.REPROBADO){ agg.reprobado++; agg.notaSum+=r[R.NOTA]; agg.notaN++; }
-  else agg.norindio++;
+  if(r[R.ESTADO]===EST.APROBADO) agg.aprobado++;
+  else if(r[R.ESTADO]===EST.REPROBADO) agg.reprobado++;
+  else agg.encurso++;
+  if(rindio(r)){ agg.rindio++; agg.notaSum+=r[R.NOTA]; agg.notaN++; }
 }
 function aggStats(agg){
-  const rindio = agg.aprobado+agg.reprobado;
   return {
-    total: agg.total, rindio, aprobado: agg.aprobado, reprobado: agg.reprobado, norindio: agg.norindio,
+    total: agg.total, rindio: agg.rindio, aprobado: agg.aprobado, reprobado: agg.reprobado,
+    encurso: agg.encurso, norindio: agg.total-agg.rindio,
     nStudents: agg.students.size,
-    pctRindio: agg.total? rindio/agg.total*100 : null,
-    pctAprobado: rindio? agg.aprobado/rindio*100 : null,
-    pctReprobado: rindio? agg.reprobado/rindio*100 : null,
-    pctNorindio: agg.total? agg.norindio/agg.total*100 : null,
+    pctAprobado: agg.total? agg.aprobado/agg.total*100 : null,
+    pctReprobado: agg.total? agg.reprobado/agg.total*100 : null,
+    pctEncurso: agg.total? agg.encurso/agg.total*100 : null,
+    pctRindio: agg.total? agg.rindio/agg.total*100 : null,
+    pctNorindio: agg.total? (agg.total-agg.rindio)/agg.total*100 : null,
     notaProm: agg.notaN? agg.notaSum/agg.notaN : null,
   };
 }
@@ -145,25 +157,51 @@ function groupBy(rows, keyFn){
   });
   return m;
 }
+/* ---------- resultado a nivel de INSCRIPCION (estudiante-carrera) ----------
+   Criterio de la nivelación: una inscripción está Aprobada solo si aprobó TODAS
+   sus asignaturas; es "No realizó examen" si no se presentó a ninguna, y
+   Reprobada en el resto (rindió algo y le quedó al menos una materia).
+
+   El estado se calcula siempre sobre TODAS las filas de la inscripción, nunca
+   sobre las filtradas: filtrar por asignatura o docente elige QUÉ inscripciones
+   se miran, no redefine si aprobaron o no su nivelación. */
+const INS = (()=>{
+  const m = new Map();
+  DATA.rows.forEach(r=>{
+    let x = m.get(r[R.SID]);
+    if(!x){ x = {carrera:r[R.CARRERA], n:0, aprob:0, rindio:0}; m.set(r[R.SID], x); }
+    x.n++;
+    if(r[R.ESTADO]===EST.APROBADO) x.aprob++;
+    if(rindio(r)) x.rindio++;
+  });
+  m.forEach(x=>{ x.pendientes = x.n - x.aprob; });   // asignaturas que le faltan aprobar
+  return m;
+})();
+
+function insStats(rows){
+  const seen = new Set();
+  let total=0, aprobadas=0, unaSola=0, sinRendir=0;
+  rows.forEach(r=>{
+    const sid = r[R.SID];
+    if(seen.has(sid)) return;
+    seen.add(sid);
+    const x = INS.get(sid);
+    total++;
+    if(x.pendientes===0) aprobadas++;
+    else if(x.pendientes===1) unaSola++;
+    if(x.rindio===0) sinRendir++;
+  });
+  return {total, aprobadas, unaSola, sinRendir,
+    pctAprobadas: total? aprobadas/total*100 : null};
+}
+
 function computeKpis(rows){
   const agg = emptyAgg();
   rows.forEach(r=>addRow(agg,r));
-  const stats = aggStats(agg);
-  const sm = new Map();
-  rows.forEach(r=>{
-    const sid=r[R.SID], e=r[R.ESTADO];
-    if(!sm.has(sid)) sm.set(sid, {rindio:false, allAp:true});
-    const s = sm.get(sid);
-    if(e===EST.APROBADO || e===EST.REPROBADO) s.rindio = true;
-    if(e!==EST.APROBADO) s.allAp = false;
-  });
-  let totalEst = sm.size, rindioEst = 0, totalAp = 0;
-  sm.forEach(s=>{ if(s.rindio) rindioEst++; if(s.allAp) totalAp++; });
-  const cercaAprobar = rows.filter(r=>(r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO) && r[R.NOTA]>=60 && r[R.NOTA]<70).length;
-  const repiten = rows.filter(r=>r[R.MATRICULA]>MAT.PRIMERA).length;
-  const evaluados = agg.aprobado+agg.reprobado;
   return {
-    stats, totalEst, rindioEst, totalAp, sinRendicion: totalEst-rindioEst, cercaAprobar, evaluados, repiten,
+    stats: aggStats(agg),
+    cercaAprobar: rows.filter(r=>rindio(r) && r[R.NOTA]>=60 && r[R.NOTA]<70).length,
+    repiten: rows.filter(r=>r[R.MATRICULA]>MAT.PRIMERA).length,
     nCarreras: new Set(rows.map(r=>r[R.CARRERA])).size,
     nAsignaturas: new Set(rows.map(r=>r[R.ASIG])).size,
     nDocentes: new Set(rows.map(r=>r[R.DOC])).size,
@@ -207,17 +245,28 @@ function renderFilterBar(){
   }
 }
 
-/* ---------- mapa de calor: % Rindió / % Aprobado / % Reprobado por carrera, asignatura o matrícula ---------- */
+/* ---------- mapa de calor: % Aprobado / % Reprobado / % En curso por carrera, asignatura o matrícula ---------- */
 const DIM_FIELD = {carrera:R.CARRERA, asignatura:R.ASIG, matricula:R.MATRICULA};
 function heatmap3Card(opts){
   // opts: {title, caption, iconName, rows, dim ('carrera'|'asignatura'|'matricula'), labelFn,
-  //        headLabel, keepOrder (no reordenar por % de reprobación)}
+  //        headLabel, keepOrder (no reordenar por % de reprobación), unidad,
+  //        conRindio (agrega la columna "% Rindió examen")}
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',null,[iconBadge(opts.iconName), opts.title]));
   if(opts.caption) card.appendChild(el('p',{class:'caption'},opts.caption));
   const dimField = DIM_FIELD[opts.dim];
-  const grouped = groupBy(opts.rows, r=>r[dimField]);
-  let list = [...grouped.entries()].map(([idx,agg])=>({idx, ...aggStats(agg)}));
+  const grupos = new Map();
+  opts.rows.forEach(r=>{
+    const k = r[dimField];
+    if(k==null) return;
+    if(!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(r);
+  });
+  let list = [...grupos.entries()].map(([idx,rs])=>{
+    const agg = emptyAgg();
+    rs.forEach(r=>addRow(agg,r));
+    return {idx, ...aggStats(agg)};
+  });
   if(opts.keepOrder) list.sort((a,b)=>a.idx-b.idx);
   else list.sort((a,b)=>(b.pctReprobado??-1)-(a.pctReprobado??-1));
   if(isPrinting() && F[opts.dim]!=null){
@@ -225,26 +274,30 @@ function heatmap3Card(opts){
   }
   if(!list.length){ card.appendChild(el('div',{class:'empty-note'},'Sin datos para este filtro.')); return card; }
   const activeVal = F[opts.dim];
+  const unidad = opts.unidad || 'estudiantes-curso';
   function cell(x, pct, num, den, detailLabel){
     const color = heatColor(pct);
     const textColor = pct!=null && pct>=50 ? '#fff' : 'var(--text-primary)';
     const td = el('td',{class:'heat-cell', style:`background:${color};color:${textColor}`}, pct!=null?fmt2(pct)+'%':'—');
-    attachTip(td, opts.labelFn(x.idx)+' — '+(pct!=null?fmt2(pct)+'% ':'')+detailLabel+' ('+fmtInt(num)+' de '+fmtInt(den)+')');
+    attachTip(td, opts.labelFn(x.idx)+' — '+(pct!=null?fmt2(pct)+'% ':'')+detailLabel+' ('+fmtInt(num)+' de '+fmtInt(den)+' '+unidad+')');
     return td;
   }
   const tableWrap = el('div',{class:'table-scroll'});
   const table = el('table',{class:'datatable heatmap'});
   const headLabel = opts.headLabel || (opts.dim==='carrera'?'Carrera':'Asignatura');
-  table.appendChild(el('tr',null,[el('th',null,headLabel), el('th',null,'% Rindió'), el('th',null,'% Aprobado'), el('th',null,'% Reprobado')]));
+  const heads = [el('th',null,headLabel), el('th',null,'% Aprobado'), el('th',null,'% Reprobado'), el('th',null,'% En curso')];
+  if(opts.conRindio) heads.splice(1, 0, el('th',null,'% Rindió'));
+  table.appendChild(el('tr',null,heads));
   list.forEach(x=>{
     const isSel = activeVal===x.idx;
     const tr = el('tr',{class:'clickable'+(isSel?' selected':''), onclick:()=>toggleFilter(opts.dim, x.idx)});
     const labelTd = el('td',null, opts.labelFn(x.idx));
     if(opts.extraInfoFn) attachTip(labelTd, opts.labelFn(x.idx)+' — '+opts.extraInfoFn(x.idx));
     tr.appendChild(labelTd);
-    tr.appendChild(cell(x, x.pctRindio, x.rindio, x.total, 'rindieron'));
-    tr.appendChild(cell(x, x.pctAprobado, x.aprobado, x.rindio, 'aprobaron'));
-    tr.appendChild(cell(x, x.pctReprobado, x.reprobado, x.rindio, 'reprobaron'));
+    if(opts.conRindio) tr.appendChild(cell(x, x.pctRindio, x.rindio, x.total, 'se presentaron al examen'));
+    tr.appendChild(cell(x, x.pctAprobado, x.aprobado, x.total, 'aprobaron'));
+    tr.appendChild(cell(x, x.pctReprobado, x.reprobado, x.total, 'reprobaron'));
+    tr.appendChild(cell(x, x.pctEncurso, x.encurso, x.total, 'sin calificaciones cerradas'));
     table.appendChild(tr);
   });
   tableWrap.appendChild(table);
@@ -257,7 +310,7 @@ function notaHistCard(rows){
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',null,[iconBadge('bars'),'Distribución de la nota final']));
   card.appendChild(el('p',{class:'caption'},'Solo estudiantes-curso que rindieron el examen final. Nota mínima de aprobación: 70/100 (Art. 59, Reglamento de Admisión y Nivelación). La franja 60–69 es la zona de "casi aprobados".'));
-  const scored = rows.filter(r=>r[R.ESTADO]===EST.APROBADO || r[R.ESTADO]===EST.REPROBADO);
+  const scored = rows.filter(rindio);
   const labels = ['0-9','10-19','20-29','30-39','40-49','50-59','60-69','70-79','80-89','90-99','100+'];
   const counts = new Array(11).fill(0);
   scored.forEach(r=>{ let bi = Math.floor(r[R.NOTA]/10); if(bi<0) bi=0; if(bi>10) bi=10; counts[bi]++; });
@@ -301,9 +354,9 @@ function testParticipacionCard(rows){
     {label:'30 a 40 puntos', test:r=>testTotal(r)>=30},
   ];
   const colDefs = [
-    {label:'% Aprobó', estVal:EST.APROBADO},
-    {label:'% Reprobó', estVal:EST.REPROBADO},
-    {label:'% No rindió examen', estVal:EST.NORINDIO},
+    {label:'% Aprobó', test:r=>r[R.ESTADO]===EST.APROBADO},
+    {label:'% Rindió y reprobó', test:r=>r[R.ESTADO]===EST.REPROBADO && rindio(r)},
+    {label:'% No se presentó al examen', test:r=>!rindio(r)},
   ];
   if(!rows.length){ card.appendChild(el('div',{class:'empty-note'},'Sin datos para este filtro.')); return card; }
   const table = el('table',{class:'datatable heatmap'});
@@ -313,7 +366,7 @@ function testParticipacionCard(rows){
     const rowTotal = rowRows.length;
     const tr = el('tr',null,[el('td',null,[el('b',null,rd.label), el('div',{class:'heat-comp-n'}, fmtInt(rowTotal)+' estudiantes-curso')])]);
     colDefs.forEach(cd=>{
-      const n = rowRows.filter(r=>r[R.ESTADO]===cd.estVal).length;
+      const n = rowRows.filter(cd.test).length;
       const pct = rowTotal? n/rowTotal*100 : null;
       const bg = heatColor(pct);
       const textColor = pct!=null && pct>=50 ? '#fff' : 'var(--text-primary)';
@@ -324,9 +377,9 @@ function testParticipacionCard(rows){
     table.appendChild(tr);
   });
   card.appendChild(table);
-  const bajos = rows.filter(r=>testTotal(r)>0 && testTotal(r)<10 && (r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO));
+  const bajos = rows.filter(r=>testTotal(r)>0 && testTotal(r)<10 && rindio(r));
   const bajosAprobaron = bajos.filter(r=>r[R.ESTADO]===EST.APROBADO);
-  const altos = rows.filter(r=>testTotal(r)>=30 && (r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO));
+  const altos = rows.filter(r=>testTotal(r)>=30 && rindio(r));
   const altosAprobaron = altos.filter(r=>r[R.ESTADO]===EST.APROBADO);
   if(bajos.length && altos.length){
     card.appendChild(el('p',{class:'caption', style:'margin-top:12px;'},
@@ -340,8 +393,8 @@ function testParticipacionCard(rows){
 function brechaAprobarCard(rows){
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',null,[iconBadge('scale'),'Brecha para aprobar']));
-  card.appendChild(el('p',{class:'caption'},'Entre los estudiantes-curso que reprobaron el examen final, a cuántos puntos de los 70 necesarios (Art. 59, Reglamento de Admisión y Nivelación) se quedaron.'));
-  const reprobados = rows.filter(r=>r[R.ESTADO]===EST.REPROBADO);
+  card.appendChild(el('p',{class:'caption'},'Entre los estudiantes-curso que se presentaron al examen final y reprobaron, a cuántos puntos de los 70 necesarios (Art. 59, Reglamento de Admisión y Nivelación) se quedaron. No incluye a quienes no se presentaron, que el SGA también reprueba.'));
+  const reprobados = rows.filter(r=>r[R.ESTADO]===EST.REPROBADO && rindio(r));
   if(!reprobados.length){ card.appendChild(el('div',{class:'empty-note'},'Sin reprobados para este filtro.')); return card; }
   const buckets = [
     {label:'Menos de 5 puntos', axis:'< 5', test:g=>g<5, color:'var(--estado-cerca)'},
@@ -381,6 +434,43 @@ function brechaAprobarCard(rows){
   return card;
 }
 
+/* ---------- quien no cerro calificaciones ----------
+   Las filas "En curso" no son un resultado del estudiante: son materias que el
+   docente todavia no cerro en el SGA. La tarjeta las agrupa por carrera +
+   asignatura + docente para saber a quien reclamar, y no aparece si no hay
+   ninguna. */
+function calificacionesAbiertasCard(rows){
+  const abiertas = rows.filter(r=>r[R.ESTADO]===EST.ENCURSO);
+  if(!abiertas.length) return null;
+  const m = new Map();
+  abiertas.forEach(r=>{
+    const k = r[R.CARRERA]+'|'+r[R.ASIG]+'|'+r[R.DOC];
+    if(!m.has(k)) m.set(k, {c:r[R.CARRERA], a:r[R.ASIG], d:r[R.DOC], n:0});
+    m.get(k).n++;
+  });
+  const list = [...m.values()].sort((x,y)=>y.n-x.n);
+  const nDoc = new Set(list.map(x=>x.d)).size;
+  const card = el('div',{class:'card'});
+  card.appendChild(el('h2',null,[iconBadge('clock'),'Calificaciones sin cerrar']));
+  card.appendChild(el('p',{class:'caption'},
+    fmtInt(abiertas.length)+' matrículas siguen en estado "En curso": el docente no cerró las calificaciones en el SGA, así que esos estudiantes no tienen resultado. '+
+    (nDoc===1?'Corresponden a un solo docente.':'Corresponden a '+fmtInt(nDoc)+' docentes.')));
+  const tableWrap = el('div',{class:'table-scroll'});
+  const table = el('table',{class:'datatable'});
+  table.appendChild(el('tr',null,[el('th',null,'Carrera'), el('th',null,'Asignatura'), el('th',null,'Docente'), el('th',null,'Estudiantes')]));
+  list.forEach(x=>{
+    table.appendChild(el('tr',{class:'clickable', onclick:()=>{ F.asignatura=x.a; F.docente=x.d; rerender(); }},[
+      el('td',null, DATA.dict.carrera[x.c]),
+      el('td',null, DATA.dict.asignatura[x.a]),
+      el('td',null, DATA.dict.docente[x.d]),
+      el('td',{style:'text-align:right;'}, fmtInt(x.n)),
+    ]));
+  });
+  tableWrap.appendChild(table);
+  card.appendChild(tableWrap);
+  return card;
+}
+
 /* ================= VISTA GENERAL ================= */
 const gView = document.getElementById('view-global');
 
@@ -388,34 +478,40 @@ function renderGlobal(){
   gView.innerHTML = '';
   gView.appendChild(el('div',{class:'print-section-banner'},'1. Vista General'));
   const rows = filteredRows();
-  const k = computeKpis(rows);
+  const k = computeKpis(rows);      // nivel matrícula (estudiante-asignatura)
+  const si = insStats(rows);        // nivel inscripción (estudiante-carrera)
 
   gView.appendChild(kpiRow([
-    {label:'Total de estudiantes inscritos', icon:'users', value: fmtInt(k.totalEst), sub: k.totalEst? fmtInt(k.sinRendicion)+' sin ninguna rendición ('+fmt2(k.sinRendicion/k.totalEst*100)+'%)':'', accent:true},
-    {label:'% que rindió examen (al menos 1 curso)', icon:'check', value: k.totalEst? fmt2(k.rindioEst/k.totalEst*100)+'%':'—', sub: fmtInt(k.rindioEst)+' de '+fmtInt(k.totalEst)+' estudiantes'},
-    {label:'Aprobados completamente (todas sus materias)', icon:'award', value: fmtInt(k.totalAp)},
-    {label:'Total de matrículas (estudiante-curso)', icon:'clipboard', value: fmtInt(k.stats.total)},
-    {label:'% Rindió examen (estudiante-curso)', icon:'check', value: k.stats.pctRindio!=null?fmt2(k.stats.pctRindio)+'%':'—', sub: fmtInt(k.stats.rindio)+' de '+fmtInt(k.stats.total)},
+    {label:'Total de inscritos', icon:'users', value: fmtInt(si.total), sub:'estudiante-carrera', accent:true},
+    {label:'% Aprobado', icon:'award', value: k.stats.pctAprobado!=null?fmt2(k.stats.pctAprobado)+'%':'—', sub: fmtInt(k.stats.aprobado)+' de '+fmtInt(k.stats.total)},
+    {label:'% Reprobado', icon:'alert', value: k.stats.pctReprobado!=null?fmt2(k.stats.pctReprobado)+'%':'—', sub: fmtInt(k.stats.reprobado)+' de '+fmtInt(k.stats.total)},
+    {label:'% En curso', icon:'clock', value: k.stats.pctEncurso!=null?fmt2(k.stats.pctEncurso)+'%':'—', sub:'calificaciones sin cerrar'},
+    {label:'Total de matrículas', icon:'clipboard', value: fmtInt(k.stats.total), sub:'estudiante-asignatura'},
   ]));
   gView.appendChild(kpiRow([
-    {label:'% Aprobado (sobre quienes rindieron)', icon:'award', value: k.stats.pctAprobado!=null?fmt2(k.stats.pctAprobado)+'%':'—'},
-    {label:'% Reprobado (sobre quienes rindieron)', icon:'alert', value: k.stats.pctReprobado!=null?fmt2(k.stats.pctReprobado)+'%':'—'},
-    {label:'Estudiantes "a un paso de aprobar"', icon:'scale', value: fmtInt(k.cercaAprobar), sub:'nota final entre 60 y 69.9'},
+    {label:'Aprobaron todas sus asignaturas', icon:'award', value: fmtInt(si.aprobadas),
+      sub: si.pctAprobadas!=null? fmt2(si.pctAprobadas)+'% de los inscritos':''},
+    {label:'Les quedó una sola asignatura', icon:'scale', value: fmtInt(si.unaSola),
+      sub: si.total? fmt2(si.unaSola/si.total*100)+'% de los inscritos':''},
+    {label:'No se presentó a ningún examen', icon:'alert', value: fmtInt(si.sinRendir),
+      sub: si.total? fmt2(si.sinRendir/si.total*100)+'% de los inscritos':''},
     {label:'Repiten la asignatura (2da matrícula o más)', icon:'clock', value: fmtInt(k.repiten),
       sub: k.stats.total? fmt2(k.repiten/k.stats.total*100)+'% de las matrículas':''},
     {label:'Carreras', icon:'grid', value: k.nCarreras},
   ]));
+  const abiertas = calificacionesAbiertasCard(rows);
+  if(abiertas) gView.appendChild(abiertas);
 
   const rankGrid = el('div',{class:'grid-2'});
   rankGrid.appendChild(heatmap3Card({
     title:'Resultado por Carrera', iconName:'grid', dim:'carrera', labelFn:i=>DATA.dict.carrera[i],
-    caption:'Ordenado por % de reprobación. Pasá el cursor sobre el nombre de la carrera para ver su modalidad, y sobre una celda para ver cuántos estudiantes fueron evaluados. Clic para filtrar todo el dashboard.',
+    caption:'Los tres estados se reparten sobre el total de matrículas de la carrera y suman 100%. Ordenado por % de reprobación. Pasá el cursor sobre el nombre de la carrera para ver su modalidad. Clic para filtrar todo el dashboard.',
     rows: filteredRows(new Set(['carrera'])),
     extraInfoFn: i=>DATA.dict.carreraModalidad[i],
   }));
   rankGrid.appendChild(heatmap3Card({
     title:'Resultado por Asignatura', iconName:'grid', dim:'asignatura', labelFn:i=>DATA.dict.asignatura[i],
-    caption:'Ordenado por % de reprobación. Pasá el cursor sobre una celda para ver cuántos estudiantes fueron evaluados. Clic para filtrar todo el dashboard.',
+    caption:'Los tres estados se reparten sobre el total de matrículas de la asignatura y suman 100%. Ordenado por % de reprobación. Clic para filtrar todo el dashboard.',
     rows: filteredRows(new Set(['asignatura'])),
   }));
   gView.appendChild(rankGrid);
@@ -423,7 +519,7 @@ function renderGlobal(){
   gView.appendChild(heatmap3Card({
     title:'Resultado por número de matrícula', iconName:'clock', dim:'matricula',
     labelFn:i=>DATA.dict.matricula[i], headLabel:'Matrícula', keepOrder:true,
-    caption:'Cuántas veces lleva tomada la asignatura cada estudiante-curso: la primera, la segunda (o sea que la repite) o la tercera en adelante. Clic para filtrar todo el dashboard.',
+    caption:'Por examen (estudiante-asignatura). Cuántas veces lleva tomada esa asignatura: la primera, la segunda (o sea que la repite) o la tercera en adelante. Clic para filtrar todo el dashboard.',
     rows: filteredRows(new Set(['matricula'])),
   }));
 
@@ -480,10 +576,21 @@ window.addEventListener('afterprint', ()=>{
   rerender();
 });
 
+/* Ranking de carreras por % de reprobación a nivel inscripción (mismo criterio
+   que el mapa de calor de la Vista General), para ordenar el desplegable. */
 const CARRERA_STATS_ALL = (()=>{
-  const grouped = groupBy(DATA.rows, r=>r[R.CARRERA]);
+  const porCarrera = new Map();
+  DATA.rows.forEach(r=>{
+    const k = r[R.CARRERA];
+    if(!porCarrera.has(k)) porCarrera.set(k, []);
+    porCarrera.get(k).push(r);
+  });
   const arr = new Array(DATA.dict.carrera.length).fill(null);
-  grouped.forEach((agg,idx)=>{ arr[idx] = aggStats(agg); });
+  porCarrera.forEach((rs,idx)=>{
+    const agg = emptyAgg();
+    rs.forEach(r=>addRow(agg,r));
+    arr[idx] = aggStats(agg);
+  });
   return arr;
 })();
 const CARRERA_ORDER = [...DATA.dict.carrera.keys()].sort((a,b)=>{
@@ -504,17 +611,25 @@ function buildDropdown(){
   dropdownMenu.innerHTML = '';
   const q = selSearch.value.trim().toLowerCase();
   const scopeRows = filteredRows(new Set(['carrera']));
-  const grouped = groupBy(scopeRows, r=>r[R.CARRERA]);
+  const porCarrera = new Map();
+  scopeRows.forEach(r=>{
+    const k = r[R.CARRERA];
+    if(!porCarrera.has(k)) porCarrera.set(k, []);
+    porCarrera.get(k).push(r);
+  });
   let any = false;
   CARRERA_ORDER.forEach(idx=>{
     const label = DATA.dict.carrera[idx];
     if(q && !label.toLowerCase().includes(q)) return;
     any = true;
-    const s = aggStats(grouped.get(idx) || emptyAgg());
+    const rs = porCarrera.get(idx) || [];
+    const agg = emptyAgg();
+    rs.forEach(r=>addRow(agg,r));
+    const s = aggStats(agg);
     const item = el('div',{class:'dropdown-item'+(F.carrera===idx?' active':''), onclick:()=>selectCarrera(idx)},[
       el('span',{class:'dd-dot', style:`background:${riskColor(s.pctReprobado)}`}),
       el('span',{class:'dd-label'}, label),
-      el('span',{class:'dd-sub'}, fmtInt(s.total)+' matric. · '+(s.pctReprobado!=null?fmt2(s.pctReprobado)+'% reprob.':'sin datos')),
+      el('span',{class:'dd-sub'}, fmtInt(insStats(rs).total)+' inscritos · '+(s.pctReprobado!=null?fmt2(s.pctReprobado)+'% reprob.':'sin datos')),
     ]);
     dropdownMenu.appendChild(item);
   });
@@ -574,7 +689,8 @@ function renderCarreraTab(){
   const cIdx = F.carrera;
   const rows = filteredRows(new Set(['carrera'])).filter(r=>r[R.CARRERA]===cIdx);
   const agg = emptyAgg(); rows.forEach(r=>addRow(agg,r));
-  const s = aggStats(agg);
+  const s = aggStats(agg);        // nivel matrícula (estudiante-asignatura)
+  const si = insStats(rows);      // nivel inscripción (estudiante-carrera)
 
   carreraBody.appendChild(el('div',{class:'print-section-banner'},'2. Detalle por Carrera: '+DATA.dict.carrera[cIdx]));
   carreraBody.appendChild(el('div',{class:'callout-row'},[
@@ -582,15 +698,18 @@ function renderCarreraTab(){
   ]));
 
   carreraBody.appendChild(kpiRow([
-    {label:'Matriculados', icon:'clipboard', value: fmtInt(s.total)},
-    {label:'% Rindió examen', icon:'check', value: s.pctRindio!=null?fmt2(s.pctRindio)+'%':'—', sub: fmtInt(s.rindio)+' de '+fmtInt(s.total)},
-    {label:'% Aprobado', icon:'award', value: s.pctAprobado!=null?fmt2(s.pctAprobado)+'%':'—'},
-    {label:'% Reprobado', icon:'alert', value: s.pctReprobado!=null?fmt2(s.pctReprobado)+'%':'—'},
+    {label:'Total de inscritos', icon:'users', value: fmtInt(si.total), sub:'estudiante-carrera', accent:true},
+    {label:'% Aprobado', icon:'award', value: s.pctAprobado!=null?fmt2(s.pctAprobado)+'%':'—', sub: fmtInt(s.aprobado)+' de '+fmtInt(s.total)},
+    {label:'% Reprobado', icon:'alert', value: s.pctReprobado!=null?fmt2(s.pctReprobado)+'%':'—', sub: fmtInt(s.reprobado)+' de '+fmtInt(s.total)},
+    {label:'% En curso', icon:'clock', value: s.pctEncurso!=null?fmt2(s.pctEncurso)+'%':'—', sub:'calificaciones sin cerrar'},
+    {label:'% Rindió el examen', icon:'check', value: s.pctRindio!=null?fmt2(s.pctRindio)+'%':'—', sub: fmtInt(s.rindio)+' de '+fmtInt(s.total)+' matrículas'},
   ]));
   carreraBody.appendChild(kpiRow([
+    {label:'Matrículas (estudiante-asignatura)', icon:'clipboard', value: fmtInt(s.total)},
+    {label:'Aprobaron todas sus asignaturas', icon:'award', value: fmtInt(si.aprobadas),
+      sub: si.pctAprobadas!=null? fmt2(si.pctAprobadas)+'% de los inscritos':''},
+    {label:'Les quedó una sola asignatura', icon:'scale', value: fmtInt(si.unaSola)},
     {label:'Promedio nota final (rindieron)', icon:'trending', value: s.notaProm!=null?fmt1(s.notaProm):'—'},
-    {label:'% no realizó examen', icon:'alert', value: s.pctNorindio!=null?fmt2(s.pctNorindio)+'%':'—', sub: fmtInt(s.norindio)+' matrículas-curso'},
-    {label:'Asignaturas', icon:'list', value: new Set(rows.map(r=>r[R.ASIG])).size},
     {label:'Docentes', icon:'users', value: new Set(rows.map(r=>r[R.DOC])).size},
   ]));
 
@@ -600,7 +719,7 @@ function renderCarreraTab(){
   const grid1 = el('div',{class:'grid-2'});
   grid1.appendChild(heatmap3Card({
     title:'Resultado por Asignatura', iconName:'grid', dim:'asignatura', labelFn:i=>DATA.dict.asignatura[i],
-    caption:'Ordenado por % de reprobación. Pasá el cursor sobre una celda para ver cuántos estudiantes fueron evaluados. Clic para filtrar todo el dashboard.',
+    caption:'Por examen (estudiante-asignatura), no por inscripción. Ordenado por % de reprobación. Pasá el cursor sobre una celda para ver cuántos estudiantes fueron evaluados. Clic para filtrar todo el dashboard.',
     rows: asigScopeRows,
   }));
   grid1.appendChild(detalleParalelosCard(paraleloScopeRows));

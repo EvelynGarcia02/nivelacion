@@ -22,17 +22,24 @@ ayudo a subir la nota despues del examen (ej. cedula 0957410301: Fisica
 68->70 y Matematicas 62->70, ambas de REPROBADO a APROBADO). El SGA es el
 sistema academico oficial y refleja esos ajustes; Moodle no.
 
-"NO REALIZO EXAMEN": el SGA marcaba con `EN CURSO` al estudiante-curso sin
-examen calificado, pero al cerrar el periodo deja como REPROBADO al que no
-se presento. O sea que el estado ya no distingue "no rindio" de "rindio y
-reprobo". La marca estable es `ex = 0`: se verifico contra el corte del
-30/07 que las 32.926 filas calificadas tienen ex > 0 y las 5.731 `EN CURSO`
-tienen todas ex = 0, y en el export del 11/08 la nota final maxima entre las
-filas con ex = 0 es 40, o sea solo puntos de test. Por eso el tercer estado
-del dashboard se reconstruye con `ex == 0 -> No realizo examen`, que es lo
-que mantiene vivos el "% Rindio examen" y el "% Aprobado sobre quienes
-rindieron". OJO: para el SGA esas matriculas son reprobadas; el dashboard
-las cuenta aparte a proposito.
+ESTADOS: se toman los del SGA tal cual (APROBADO / REPROBADO / EN CURSO) y
+los porcentajes del dashboard son sobre el total, no sobre un subconjunto:
+58,03% / 41,90% / 0,07% en el corte del 11/08/2026.
+
+`EN CURSO` con el periodo cerrado ya no significa "examen sin calificar del
+estudiante" sino que el DOCENTE no cerro las calificaciones de esa materia.
+Por eso se muestra como tercer estado en vez de fundirlo con reprobado: el
+dashboard tiene una tarjeta que nombra al docente, la asignatura y la
+carrera donde falta cerrar. Hoy son 27 filas, todas de Pensamiento
+Computacional en Administracion de Empresas.
+
+Al que no se presento al examen el SGA lo reprueba, y el dashboard respeta
+eso: NO se lo reclasifica. La marca de no haberse presentado es `ex = 0`
+(verificado contra el corte del 30/07: las 32.926 filas calificadas tienen
+ex > 0 y las 5.731 `EN CURSO` tienen todas ex = 0; y entre las filas con
+ex = 0 la nota final maxima es 40, o sea solo puntos de test). Como `ex`
+viaja en cada fila, el "% Rindio examen" de la vista Por Carrera se calcula
+en el navegador con `ex > 0`, sin necesidad de un estado aparte.
 
 IDENTIDAD: se agrupa por `inscripcion_id` (la matricula de una persona en
 una carrera), NO por `id_estudiante` (la persona) ni por `cedula`. Una misma
@@ -189,9 +196,11 @@ def r1(x):
     return round(float(x) + 1e-9, 1)
 
 
-# Estados del dashboard (el indice se guarda en cada fila)
-ESTADO_LABELS = ["Aprobado", "Reprobado", "No realizó examen"]
-AP, REP, NORINDIO = 0, 1, 2
+# Estados del dashboard: son los del SGA tal cual (el indice se guarda en cada
+# fila). "En curso" = el docente todavia no cerro las calificaciones de esa
+# materia; el dashboard lo muestra aparte justamente para saber a quien reclamar.
+ESTADO_LABELS = ["Aprobado", "Reprobado", "En curso"]
+ESTADO_IDX = {"APROBADO": 0, "REPROBADO": 1, "EN CURSO": 2}
 
 # numero_matricula = cuantas veces lleva tomada esa asignatura (1ra, 2da, 3ra).
 # De 3 en adelante son 9 filas en total, asi que se agrupan en un solo tramo.
@@ -296,19 +305,16 @@ def main():
 
     # ---------- 4. filas ----------
     rows = []
-    no_rindio = Counter()
+    sin_examen = 0
     for t in new.itertuples(index=False):
         est_raw = norm_key(t.estado_materia)
+        if est_raw not in ESTADO_IDX:
+            raise SystemExit(f"estado_materia desconocido: '{t.estado_materia}' en {t.carrera} / {t.asignatura}")
+        estado = ESTADO_IDX[est_raw]
+        # ex = 0 significa que no se presento al examen final; no cambia el estado
+        # (el SGA ya lo reprobo), pero el dashboard lo usa para el "% rindio"
         if t.ex == 0:
-            # No se presento al examen: el SGA lo deja como REPROBADO al cerrar el
-            # periodo (y como EN CURSO si todavia no lo cerro). El dashboard lo
-            # separa en su propio estado -- ver docstring.
-            estado = NORINDIO
-            no_rindio[est_raw] += 1
-        elif est_raw == "EN CURSO":
-            raise SystemExit(f"Fila EN CURSO con ex={t.ex} (se esperaba ex=0): {t.carrera} / {t.asignatura}")
-        else:
-            estado = AP if est_raw == "APROBADO" else REP
+            sin_examen += 1
         rows.append([
             ins_idx[t.inscripcion_id], c_idx[t.ck], a_idx[t.ak], d_idx[t.dk], estado,
             r1(t.nota_final), r1((t.n1 + t.n2 + t.n3 + t.n4) / 4.0), r1(t.ex),
@@ -350,8 +356,7 @@ def main():
     print(f"  {len(rows)} filas inscripcion-asignatura, {len(ins_idx)} inscripciones"
           + (f" de {personas} personas ({len(ins_idx) - personas} cursan 2 carreras)" if personas else ""))
     print(f"  {len(carrera_keys)} carreras, {len(asignatura_keys)} asignaturas, {len(docente_keys)} docentes")
-    detalle = ", ".join(f"{n} venian como {e}" for e, n in no_rindio.most_common())
-    print(f"  filas con ex=0 contadas como 'No realizó examen': {sum(no_rindio.values())} ({detalle})")
+    print(f"  filas sin examen rendido (ex=0): {sin_examen} ({sin_examen / len(rows) * 100:.2f}%)")
     est_count = Counter(r[4] for r in rows)
     for i, lab in enumerate(ESTADO_LABELS):
         print(f"    {lab}: {est_count[i]} ({est_count[i] / len(rows) * 100:.2f}%)")
