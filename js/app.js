@@ -1,13 +1,16 @@
 /* Requiere que js/data.js se cargue antes y defina la constante global DATA.
-   Fila de DATA.rows: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
+   Fila de DATA.rows: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal,
+                       testProm, examenFinal, matriculaIdx]
    estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen
+   matriculaIdx: 0 primera vez que toma la asignatura, 1 segunda, 2 tercera o más
 
    R.SID identifica a la INSCRIPCION (persona + carrera), no a la persona: hay
    estudiantes inscritos en dos carreras a la vez, y cada carrera es una cuenta
    aparte. Ver el docstring de scripts/build_data.py. */
 
-const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7};
+const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7, MATRICULA:8};
 const EST = {APROBADO:0, REPROBADO:1, NORINDIO:2};
+const MAT = {PRIMERA:0};
 
 /* ---------- helpers genericos ---------- */
 function el(tag, attrs, children){
@@ -89,7 +92,7 @@ function heatColor(pct){
 }
 
 /* ---------- estado de filtros globales (cross-filter tipo PowerBI) ---------- */
-const F = {carrera:null, asignatura:null, docente:null, estado:null};
+const F = {carrera:null, asignatura:null, docente:null, estado:null, matricula:null};
 function isPrinting(){ return document.body.classList.contains('printing-carrera'); }
 
 function rowMatches(r, exclude){
@@ -97,6 +100,7 @@ function rowMatches(r, exclude){
   if(!exclude.has('asignatura') && F.asignatura!=null && r[R.ASIG]!==F.asignatura) return false;
   if(!exclude.has('docente') && F.docente!=null && r[R.DOC]!==F.docente) return false;
   if(!exclude.has('estado') && F.estado!=null && r[R.ESTADO]!==F.estado) return false;
+  if(!exclude.has('matricula') && F.matricula!=null && r[R.MATRICULA]!==F.matricula) return false;
   return true;
 }
 const NO_EXCLUDE = new Set();
@@ -156,9 +160,10 @@ function computeKpis(rows){
   let totalEst = sm.size, rindioEst = 0, totalAp = 0;
   sm.forEach(s=>{ if(s.rindio) rindioEst++; if(s.allAp) totalAp++; });
   const cercaAprobar = rows.filter(r=>(r[R.ESTADO]===EST.APROBADO||r[R.ESTADO]===EST.REPROBADO) && r[R.NOTA]>=60 && r[R.NOTA]<70).length;
+  const repiten = rows.filter(r=>r[R.MATRICULA]>MAT.PRIMERA).length;
   const evaluados = agg.aprobado+agg.reprobado;
   return {
-    stats, totalEst, rindioEst, totalAp, sinRendicion: totalEst-rindioEst, cercaAprobar, evaluados,
+    stats, totalEst, rindioEst, totalAp, sinRendicion: totalEst-rindioEst, cercaAprobar, evaluados, repiten,
     nCarreras: new Set(rows.map(r=>r[R.CARRERA])).size,
     nAsignaturas: new Set(rows.map(r=>r[R.ASIG])).size,
     nDocentes: new Set(rows.map(r=>r[R.DOC])).size,
@@ -187,6 +192,7 @@ const FILTER_LABELS = {
   asignatura: v=>'Asignatura: '+DATA.dict.asignatura[v],
   docente: v=>'Docente: '+DATA.dict.docente[v],
   estado: v=>'Estado: '+DATA.dict.estado[v],
+  matricula: v=>'Matrícula: '+DATA.dict.matricula[v],
 };
 function renderFilterBar(){
   filterBarEl.innerHTML = '';
@@ -201,16 +207,19 @@ function renderFilterBar(){
   }
 }
 
-/* ---------- mapa de calor: % Rindió / % Aprobado / % Reprobado por carrera o asignatura ---------- */
+/* ---------- mapa de calor: % Rindió / % Aprobado / % Reprobado por carrera, asignatura o matrícula ---------- */
+const DIM_FIELD = {carrera:R.CARRERA, asignatura:R.ASIG, matricula:R.MATRICULA};
 function heatmap3Card(opts){
-  // opts: {title, caption, iconName, rows, dim ('carrera'|'asignatura'), labelFn}
+  // opts: {title, caption, iconName, rows, dim ('carrera'|'asignatura'|'matricula'), labelFn,
+  //        headLabel, keepOrder (no reordenar por % de reprobación)}
   const card = el('div',{class:'card'});
   card.appendChild(el('h2',null,[iconBadge(opts.iconName), opts.title]));
   if(opts.caption) card.appendChild(el('p',{class:'caption'},opts.caption));
-  const dimField = opts.dim==='carrera'? R.CARRERA : R.ASIG;
+  const dimField = DIM_FIELD[opts.dim];
   const grouped = groupBy(opts.rows, r=>r[dimField]);
   let list = [...grouped.entries()].map(([idx,agg])=>({idx, ...aggStats(agg)}));
-  list.sort((a,b)=>(b.pctReprobado??-1)-(a.pctReprobado??-1));
+  if(opts.keepOrder) list.sort((a,b)=>a.idx-b.idx);
+  else list.sort((a,b)=>(b.pctReprobado??-1)-(a.pctReprobado??-1));
   if(isPrinting() && F[opts.dim]!=null){
     list = list.filter(x=>x.idx===F[opts.dim]);
   }
@@ -225,7 +234,8 @@ function heatmap3Card(opts){
   }
   const tableWrap = el('div',{class:'table-scroll'});
   const table = el('table',{class:'datatable heatmap'});
-  table.appendChild(el('tr',null,[el('th',null,opts.dim==='carrera'?'Carrera':'Asignatura'), el('th',null,'% Rindió'), el('th',null,'% Aprobado'), el('th',null,'% Reprobado')]));
+  const headLabel = opts.headLabel || (opts.dim==='carrera'?'Carrera':'Asignatura');
+  table.appendChild(el('tr',null,[el('th',null,headLabel), el('th',null,'% Rindió'), el('th',null,'% Aprobado'), el('th',null,'% Reprobado')]));
   list.forEach(x=>{
     const isSel = activeVal===x.idx;
     const tr = el('tr',{class:'clickable'+(isSel?' selected':''), onclick:()=>toggleFilter(opts.dim, x.idx)});
@@ -391,6 +401,8 @@ function renderGlobal(){
     {label:'% Aprobado (sobre quienes rindieron)', icon:'award', value: k.stats.pctAprobado!=null?fmt2(k.stats.pctAprobado)+'%':'—'},
     {label:'% Reprobado (sobre quienes rindieron)', icon:'alert', value: k.stats.pctReprobado!=null?fmt2(k.stats.pctReprobado)+'%':'—'},
     {label:'Estudiantes "a un paso de aprobar"', icon:'scale', value: fmtInt(k.cercaAprobar), sub:'nota final entre 60 y 69.9'},
+    {label:'Repiten la asignatura (2da matrícula o más)', icon:'clock', value: fmtInt(k.repiten),
+      sub: k.stats.total? fmt2(k.repiten/k.stats.total*100)+'% de las matrículas':''},
     {label:'Carreras', icon:'grid', value: k.nCarreras},
   ]));
 
@@ -407,6 +419,13 @@ function renderGlobal(){
     rows: filteredRows(new Set(['asignatura'])),
   }));
   gView.appendChild(rankGrid);
+
+  gView.appendChild(heatmap3Card({
+    title:'Resultado por número de matrícula', iconName:'clock', dim:'matricula',
+    labelFn:i=>DATA.dict.matricula[i], headLabel:'Matrícula', keepOrder:true,
+    caption:'Cuántas veces lleva tomada la asignatura cada estudiante-curso: la primera, la segunda (o sea que la repite) o la tercera en adelante. Clic para filtrar todo el dashboard.',
+    rows: filteredRows(new Set(['matricula'])),
+  }));
 
   const bottomGrid = el('div',{class:'grid-2'});
   bottomGrid.appendChild(testParticipacionCard(rows));

@@ -193,10 +193,18 @@ def r1(x):
 ESTADO_LABELS = ["Aprobado", "Reprobado", "No realizó examen"]
 AP, REP, NORINDIO = 0, 1, 2
 
+# numero_matricula = cuantas veces lleva tomada esa asignatura (1ra, 2da, 3ra).
+# De 3 en adelante son 9 filas en total, asi que se agrupan en un solo tramo.
+MATRICULA_LABELS = ["1ra matrícula", "2da matrícula", "3ra matrícula o más"]
+
+
+def matricula_idx(n):
+    return min(max(int(n), 1), len(MATRICULA_LABELS)) - 1
+
 
 # Los reportes cambian de nombre de columna segun la version de la query.
 COLUMN_ALIASES = {"carrera_estudiante": "carrera", "carrera_asignatura": "carrera"}
-REQUIRED = ["inscripcion_id", "carrera", "modalidad", "asignatura", "docente",
+REQUIRED = ["inscripcion_id", "carrera", "modalidad", "asignatura", "docente", "numero_matricula",
             "n1", "n2", "n3", "n4", "ex", "nota_final", "estado_materia"]
 
 
@@ -304,6 +312,7 @@ def main():
         rows.append([
             ins_idx[t.inscripcion_id], c_idx[t.ck], a_idx[t.ak], d_idx[t.dk], estado,
             r1(t.nota_final), r1((t.n1 + t.n2 + t.n3 + t.n4) / 4.0), r1(t.ex),
+            matricula_idx(t.numero_matricula),
         ])
 
     data = {
@@ -322,8 +331,10 @@ def main():
             "asignatura": [asignaturas.label[k] for k in asignatura_keys],
             "docente": [docentes.label[k] for k in docente_keys],
             "estado": ESTADO_LABELS,
+            "matricula": MATRICULA_LABELS,
         },
-        # fila: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
+        # fila: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal,
+        #        testProm, examenFinal, matriculaIdx]
         "rows": rows,
     }
 
@@ -344,6 +355,9 @@ def main():
     est_count = Counter(r[4] for r in rows)
     for i, lab in enumerate(ESTADO_LABELS):
         print(f"    {lab}: {est_count[i]} ({est_count[i] / len(rows) * 100:.2f}%)")
+    mat_count = Counter(r[8] for r in rows)
+    for i, lab in enumerate(MATRICULA_LABELS):
+        print(f"    {lab}: {mat_count[i]} ({mat_count[i] / len(rows) * 100:.2f}%)")
 
 
 if __name__ == "__main__":
