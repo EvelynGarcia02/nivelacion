@@ -6,19 +6,15 @@ Uso:
 
 Requiere: pandas y openpyxl (pip install pandas openpyxl)
 
-FUENTES
--------
-1. Reportes del SGA: data/curso_niv_1S2026_sga*.xlsx (o .csv) -- salida de la
-   query est_cal_sga_niv_grado.sql. Puede ser un unico archivo con las 38
-   carreras o varios archivos parciales: se leen todos los que matcheen el
-   patron y cada carrera que aparezca en alguno se toma de ahi. Para
-   actualizar datos basta con reemplazar/agregar archivos en data/ y volver a
-   correr; no hay que tocar este script.
-2. Base (respaldo): data/base_sga_1S2026.js -- snapshot del js/data.js del
-   2026-07-30, tambien en git (commit ebe1316). Solo aporta las carreras que
-   NO aparezcan en ningun reporte, para no perderlas si alguna vez se corre
-   con un export parcial. Con el export completo del 11/08/2026 no aporta
-   ninguna fila y el dashboard queda 100% con actas cerradas.
+FUENTE
+------
+data/curso_niv_1S2026_sga*.csv (o .xlsx) -- salida de la query
+est_cal_sga_niv_grado.sql. Se leen todos los archivos que matcheen el patron
+y tengan las columnas de REQUIRED; los que no las tengan (exports viejos sin
+inscripcion_id) se ignoran con un aviso, para que un archivo olvidado en
+data/ no duplique filas. Si falta alguna de las 38 carreras del informe
+tambien se avisa por consola. Para actualizar datos basta con reemplazar el
+archivo en data/ y volver a correr; no hay que tocar este script.
 
 POR QUE SGA Y NO MOODLE (fuente anterior, ver git log de este archivo): las
 notas de Moodle quedaron desactualizadas para estudiantes a quienes se les
@@ -38,35 +34,37 @@ que mantiene vivos el "% Rindio examen" y el "% Aprobado sobre quienes
 rindieron". OJO: para el SGA esas matriculas son reprobadas; el dashboard
 las cuenta aparte a proposito.
 
-IDENTIDAD DE ESTUDIANTE: se usa `id_estudiante` (no `cedula`) -- no tiene
-nulos y es 1-a-1 con la cedula cuando esta existe. OJO: `id_estudiante` es
-un ID interno de cada sistema; los valores del SGA NO son los mismos IDs
-que traia el CSV de Moodle (numeraciones internas distintas) - para cruzar
-ambas fuentes hay que usar `cedula`.
+IDENTIDAD: se agrupa por `inscripcion_id` (la matricula de una persona en
+una carrera), NO por `id_estudiante` (la persona) ni por `cedula`. Una misma
+persona puede estar inscrita en dos carreras a la vez y cursar la misma
+asignatura en ambas: en el corte del 11/08/2026 son 12 personas / 13.136
+inscripciones, con 22 filas que se pisarian entre si. Agrupar por persona
+las fusionaba, subcontaba estudiantes y podia arruinar "aprobados
+completamente" (aprobar todo en una carrera y no en la otra). Cada
+inscripcion pertenece a una sola carrera, asi que es la unidad correcta para
+todo lo que el dashboard llama "estudiante".
 
-El base ya perdio los IDs (guarda indices anonimos), asi que cuando aporta
-filas se reidentifica al estudiante entre base y reporte por su firma: el
-conjunto de (carrera, asignatura, docente, promedio de test) de sus filas.
-Los test son previos al examen, o sea que no cambian entre cortes.
+`id_estudiante` se sigue leyendo, pero solo para reportar cuantas personas
+hay detras de las inscripciones (meta.totalPersonas). OJO: es un ID interno
+de cada sistema; los valores del SGA NO son los mismos que traia el CSV de
+Moodle - para cruzar ambas fuentes hay que usar `cedula`.
 """
 import json
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
-BASE = DATA / "base_sga_1S2026.js"
 SRC_GLOB = "curso_niv_1S2026_sga*"          # .xlsx o .csv
 SRC_SUFFIXES = {".xlsx", ".xls", ".csv"}
 OUT = ROOT / "js" / "data.js"
 
-# Fecha del reporte del que sale cada carrera; queda en meta.fuentes de
-# js/data.js solo como trazabilidad (el dashboard no la muestra).
-CORTE_BASE = "2026-07-30"
-CORTE_NUEVO = "2026-08-11"
+# Fecha del reporte; queda en meta.corte de js/data.js como trazabilidad
+# (el dashboard no la muestra).
+CORTE = "2026-08-11"
 
 LOWER_WORDS = {"de", "del", "la", "las", "el", "los", "y", "en", "a", "al", "con", "por", "para"}
 
@@ -196,37 +194,19 @@ ESTADO_LABELS = ["Aprobado", "Reprobado", "No realizó examen"]
 AP, REP, NORINDIO = 0, 1, 2
 
 
-def load_js_data(path):
-    """Lee un archivo 'const DATA = {...};' y devuelve el dict."""
-    txt = path.read_text(encoding="utf-8")
-    start = txt.index("{")
-    end = txt.rstrip().rstrip(";").rindex("}") + 1
-    return json.loads(txt[start:end])
+# Los reportes cambian de nombre de columna segun la version de la query.
+COLUMN_ALIASES = {"carrera_estudiante": "carrera", "carrera_asignatura": "carrera"}
+REQUIRED = ["inscripcion_id", "carrera", "modalidad", "asignatura", "docente",
+            "n1", "n2", "n3", "n4", "ex", "nota_final", "estado_materia"]
 
 
 def read_source(path):
-    """Lee un reporte del SGA, sea Excel o CSV."""
+    """Lee un reporte del SGA (Excel o CSV) y normaliza los nombres de columna."""
     if path.suffix.lower() == ".csv":
-        return pd.read_csv(path, encoding="utf-8-sig")
-    return pd.read_excel(path, sheet_name=0)
-
-
-EMPTY_BASE = {
-    "dict": {"carrera": [], "carreraModalidad": [], "asignatura": [], "docente": [],
-             "estado": ESTADO_LABELS},
-    "rows": [],
-}
-
-
-def load_base():
-    """Respaldo opcional: solo aporta carreras ausentes de los reportes.
-
-    Con un export completo del SGA no hace falta, asi que si no esta se sigue
-    igual (para recuperarlo: git show ebe1316:js/data.js > data/base_sga_1S2026.js).
-    """
-    if not BASE.exists():
-        return EMPTY_BASE
-    return load_js_data(BASE)
+        df = pd.read_csv(path, encoding="utf-8-sig")
+    else:
+        df = pd.read_excel(path, sheet_name=0)
+    return df.rename(columns={c: COLUMN_ALIASES.get(c, c) for c in df.columns})
 
 
 class Registry:
@@ -241,50 +221,54 @@ class Registry:
 
 
 def main():
-    base = load_base()
-    sources = sorted(p for p in DATA.glob(SRC_GLOB)
-                     if p.suffix.lower() in SRC_SUFFIXES and not p.name.startswith("~$"))
-    if not sources:
+    candidatos = sorted(p for p in DATA.glob(SRC_GLOB)
+                        if p.suffix.lower() in SRC_SUFFIXES and not p.name.startswith("~$"))
+    if not candidatos:
         raise SystemExit(f"No hay reportes del SGA ({DATA}/{SRC_GLOB} con extension {sorted(SRC_SUFFIXES)})")
 
     # ---------- 1. reportes del SGA ----------
-    frames = []
-    for path in sources:
+    frames, sources, ignorados = [], [], []
+    for path in candidatos:
         df = read_source(path)
+        faltan = [c for c in REQUIRED if c not in df.columns]
+        if faltan:
+            # p.ej. los exports viejos sin inscripcion_id: se ignoran en vez de
+            # duplicar filas o romper el build
+            ignorados.append((path.name, faltan))
+            continue
         df["_archivo"] = path.name
-        frames.append(df)
+        # id_estudiante es opcional: solo se usa para reportar cuantas personas
+        # hay detras de las inscripciones
+        cols = REQUIRED + ["_archivo"] + [c for c in ("id_estudiante",) if c in df.columns]
+        frames.append(df[cols])
+        sources.append(path)
+    for nombre, faltan in ignorados:
+        print(f"AVISO: se ignora {nombre}, le faltan columnas: {', '.join(faltan)}")
+    if not frames:
+        raise SystemExit("Ningun reporte tiene las columnas necesarias (falta reexportar con inscripcion_id)")
     new = pd.concat(frames, ignore_index=True)
 
     new["ck"] = new["carrera"].map(lambda s: norm_key(carrera_label(s)))
     new["ak"] = new["asignatura"].map(lambda s: norm_key(asignatura_label(s)))
     new["dk"] = new["docente"].map(norm_key)
 
-    dup = new.duplicated(subset=["id_estudiante", "ck", "ak"]).sum()
+    dup = new.duplicated(subset=["inscripcion_id", "ak"]).sum()
     if dup:
-        print(f"AVISO: {dup} filas duplicadas (mismo estudiante+carrera+asignatura) entre los CSV")
-
-    covered = set(new["ck"])
+        print(f"AVISO: {dup} filas duplicadas (misma inscripcion + asignatura) entre los reportes")
 
     # ---------- 2. diccionarios ----------
     carreras, asignaturas, docentes = Registry(), Registry(), Registry()
-    modalidad, fuente = {}, {}
-
-    for i, label in enumerate(base["dict"]["carrera"]):
-        k = norm_key(label)
-        carreras.add(k, label)
-        modalidad[k] = base["dict"]["carreraModalidad"][i]
-        fuente[k] = 0
-    for label in base["dict"]["asignatura"]:
-        asignaturas.add(norm_key(label), label)
-    for label in base["dict"]["docente"]:
-        docentes.add(norm_key(label), label)
-
+    modalidad = {}
     for t in new.itertuples(index=False):
         carreras.add(t.ck, carrera_label(t.carrera))
         asignaturas.add(t.ak, asignatura_label(t.asignatura))
         docentes.add(t.dk, docente_label(t.docente))
         modalidad[t.ck] = modalidad_label(t.modalidad)
-        fuente[t.ck] = 1
+
+    faltantes = [c for c in _REPORT_CARRERAS if norm_key(c) not in carreras.label]
+    if faltantes:
+        print(f"AVISO: {len(faltantes)} carreras del informe no aparecen en los reportes: "
+              f"{', '.join(faltantes)}")
 
     carrera_keys = sorted(carreras.label)
     asignatura_keys = sorted(asignaturas.label)
@@ -293,54 +277,17 @@ def main():
     a_idx = {k: i for i, k in enumerate(asignatura_keys)}
     d_idx = {k: i for i, k in enumerate(docente_keys)}
 
-    # ---------- 3. filas del base que se conservan / firmas de las que se reemplazan ----------
-    b_car = base["dict"]["carrera"]
-    b_asig = base["dict"]["asignatura"]
-    b_doc = base["dict"]["docente"]
-    b_est = base["dict"]["estado"]
-    b_est_idx = {lab: ESTADO_LABELS.index(lab) for lab in b_est}
+    # ---------- 3. identidad: la inscripcion, no la persona ----------
+    # Una misma persona puede tener dos inscripciones (dos carreras) y cursar la
+    # misma asignatura en ambas; agrupar por persona las fusionaria. Ver docstring.
+    ins_idx = {}
+    for ins in new["inscripcion_id"]:
+        if ins not in ins_idx:
+            ins_idx[ins] = len(ins_idx)
+    personas = new["id_estudiante"].nunique() if "id_estudiante" in new.columns else None
 
-    kept = []                      # filas de carreras no actualizadas (ya con indices nuevos)
-    base_rows_covered = defaultdict(list)   # sid del base -> filas (para la firma)
-    for r in base["rows"]:
-        ck = norm_key(b_car[r[1]])
-        row = [r[0], c_idx[ck], a_idx[norm_key(b_asig[r[2]])], d_idx[norm_key(b_doc[r[3]])],
-               b_est_idx[b_est[r[4]]], r[5], r[6], r[7]]
-        if ck in covered:
-            base_rows_covered[r[0]].append((ck, norm_key(b_asig[r[2]]), norm_key(b_doc[r[3]]), r[6]))
-        else:
-            kept.append(row)
-
-    # ---------- 4. reidentificacion de estudiantes base <-> CSV ----------
-    new_rows_by_id = defaultdict(list)
-    for t in new.itertuples(index=False):
-        new_rows_by_id[t.id_estudiante].append((t.ck, t.ak, t.dk, r1((t.n1 + t.n2 + t.n3 + t.n4) / 4.0)))
-
-    def by_signature(d):
-        out = defaultdict(list)
-        for sid, rows in d.items():
-            out[tuple(sorted(rows))].append(sid)
-        return out
-
-    sig_base = by_signature(base_rows_covered)
-    sig_new = by_signature(new_rows_by_id)
-    id_to_sid = {}
-    for sig, new_ids in sig_new.items():
-        base_sids = sig_base.get(sig, [])
-        # dentro de una misma firma los estudiantes son indistinguibles en las
-        # carreras actualizadas: se emparejan en orden, de forma determinista
-        for nid, bsid in zip(sorted(new_ids), sorted(base_sids)):
-            id_to_sid[nid] = bsid
-    sin_match = len(new_rows_by_id) - len(id_to_sid)
-
-    next_sid = max((r[0] for r in base["rows"]), default=-1) + 1
-    for nid in sorted(new_rows_by_id):
-        if nid not in id_to_sid:
-            id_to_sid[nid] = next_sid
-            next_sid += 1
-
-    # ---------- 5. filas nuevas ----------
-    fresh = []
+    # ---------- 4. filas ----------
+    rows = []
     no_rindio = Counter()
     for t in new.itertuples(index=False):
         est_raw = norm_key(t.estado_materia)
@@ -354,51 +301,29 @@ def main():
             raise SystemExit(f"Fila EN CURSO con ex={t.ex} (se esperaba ex=0): {t.carrera} / {t.asignatura}")
         else:
             estado = AP if est_raw == "APROBADO" else REP
-        fresh.append([
-            id_to_sid[t.id_estudiante], c_idx[t.ck], a_idx[t.ak], d_idx[t.dk], estado,
+        rows.append([
+            ins_idx[t.inscripcion_id], c_idx[t.ck], a_idx[t.ak], d_idx[t.dk], estado,
             r1(t.nota_final), r1((t.n1 + t.n2 + t.n3 + t.n4) / 4.0), r1(t.ex),
         ])
-
-    # ---------- 6. compactar indices de estudiante ----------
-    rows = kept + fresh
-    remap = {}
-    for r in rows:
-        if r[0] not in remap:
-            remap[r[0]] = len(remap)
-        r[0] = remap[r[0]]
-
-    # Trazabilidad de que reporte del SGA salio cada carrera. No se muestra en el
-    # dashboard: sirve para saber que hay que reexportar cuando se quiera
-    # refrescar una carrera. Si el base no aporto ninguna carrera queda una sola
-    # fuente, o sea que todo el dashboard salio del mismo reporte.
-    FUENTES_POSIBLES = [
-        {"fecha": CORTE_BASE, "etiqueta": "Reporte SGA del 30/07/2026"},
-        {"fecha": CORTE_NUEVO, "etiqueta": "Reporte SGA del 11/08/2026",
-         "archivos": [p.name for p in sources]},
-    ]
-    usadas = sorted({fuente[k] for k in carrera_keys})
-    fmap = {f: i for i, f in enumerate(usadas)}
-    fuentes = [FUENTES_POSIBLES[f] for f in usadas]
-    carrera_fuente = [fmap[fuente[k]] for k in carrera_keys]
 
     data = {
         "meta": {
             "generated": pd.Timestamp.now().strftime("%Y-%m-%d"),
+            "corte": CORTE,
+            "archivos": [p.name for p in sources],
             "totalRows": len(rows),
-            "totalStudents": len(remap),
-            "fuentes": fuentes,
-            "carrerasPorFuente": [carrera_fuente.count(i) for i in range(len(fuentes))],
+            "totalStudents": len(ins_idx),   # inscripciones (estudiante-carrera)
+            "totalPersonas": personas,       # personas distintas detras de esas inscripciones
         },
         "dict": {
             "carrera": [carreras.label[k] for k in carrera_keys],
             "carreraModalidad": [modalidad[k] for k in carrera_keys],
             "carreraArea": [area_for(k) for k in carrera_keys],
-            "carreraFuente": carrera_fuente,
             "asignatura": [asignaturas.label[k] for k in asignatura_keys],
             "docente": [docentes.label[k] for k in docente_keys],
             "estado": ESTADO_LABELS,
         },
-        # fila: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
+        # fila: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
         "rows": rows,
     }
 
@@ -408,20 +333,12 @@ def main():
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
         f.write(";\n")
 
-    # ---------- 7. resumen ----------
+    # ---------- 5. resumen ----------
     print(f"Escrito {OUT}")
-    print(f"  reportes: {', '.join(p.name for p in sources)}")
-    print(f"  {len(rows)} filas estudiante-curso ({len(fresh)} de los reportes, {len(kept)} del base), "
-          f"{len(remap)} estudiantes")
+    print(f"  reportes: {', '.join(p.name for p in sources)} (corte {CORTE})")
+    print(f"  {len(rows)} filas inscripcion-asignatura, {len(ins_idx)} inscripciones"
+          + (f" de {personas} personas ({len(ins_idx) - personas} cursan 2 carreras)" if personas else ""))
     print(f"  {len(carrera_keys)} carreras, {len(asignatura_keys)} asignaturas, {len(docente_keys)} docentes")
-    if len(kept):
-        faltan = [carreras.label[k] for k in carrera_keys if fuente[k] == 0]
-        print(f"  AVISO: {len(faltan)} carreras no vienen en los reportes y se toman del base "
-              f"({CORTE_BASE}): {', '.join(faltan)}")
-        print(f"  reidentificados por firma: {len(new_rows_by_id) - sin_match}/{len(new_rows_by_id)} estudiantes"
-              f"{'' if not sin_match else f' ({sin_match} sin match, cuentan como nuevos)'}")
-    else:
-        print(f"  todas las carreras salen de los reportes del {CORTE_NUEVO} (el base no aporta filas)")
     detalle = ", ".join(f"{n} venian como {e}" for e, n in no_rindio.most_common())
     print(f"  filas con ex=0 contadas como 'No realizó examen': {sum(no_rindio.values())} ({detalle})")
     est_count = Counter(r[4] for r in rows)

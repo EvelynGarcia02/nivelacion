@@ -39,16 +39,15 @@ que aprueben; esa corrección solo queda reflejada en el SGA. Por eso el SGA es 
 del dashboard.
 
 `js/data.js` se genera con `python scripts/build_data.py`, que lee los reportes del SGA que estén
-en `data/curso_niv_1S2026_sga*.xlsx` (o `.csv`) — salida de la query `est_cal_sga_niv_grado.sql`.
-Hoy es un único archivo con **las 38 carreras y las actas ya cerradas** (corte del 11/08/2026).
+en `data/curso_niv_1S2026_sga*.csv` (o `.xlsx`) — salida de la query `est_cal_sga_niv_grado.sql`.
+Hoy es `curso_niv_1S2026_sga_ins.csv`: **las 38 carreras, actas ya cerradas** (corte del
+11/08/2026) y a nivel de inscripción.
 
-El script acepta varios archivos a la vez, así que también sirve un export partido por grupos de
-carreras: cada carrera se toma del reporte donde aparezca. Si alguna carrera no viene en ningún
-reporte, se la rescata del respaldo `data/base_sga_1S2026.js` (snapshot del 30/07/2026, también en
-git en el commit `ebe1316`) y el script lo avisa por consola nombrando las carreras afectadas — así
-un export parcial nunca borra carreras en silencio. De qué reporte salió cada una queda registrado
-en `meta.fuentes` / `dict.carreraFuente` de `js/data.js` (solo trazabilidad; el dashboard no lo
-muestra).
+El script acepta varios archivos a la vez (sirve un export partido por grupos de carreras) y sobre
+cada uno hace dos controles que avisa por consola: ignora los que no traigan las columnas
+necesarias — entre ellas `inscripcion_id`, así un export viejo olvidado en `data/` no duplica
+filas — y nombra las carreras del informe que no aparezcan en ningún reporte, para que un export
+parcial no achique el dashboard en silencio.
 
 ## Metodología de los cálculos
 
@@ -62,8 +61,12 @@ muestra).
   o sea solo puntos de test. Por eso se reconstruye el tercer estado con `ex = 0`, dejándolo fuera
   del denominador de `% Aprobado`. Ojo que para el SGA esas matrículas son reprobadas.
 - `% Aprobado` / `% Reprobado` = sobre estudiantes-curso que rindieron (no sobre el total).
-- Identidad de estudiante: se usa `id_estudiante` (no la cédula) para agrupar filas de un mismo
-  estudiante; ver el docstring de `scripts/build_data.py` para el detalle.
+- Identidad de estudiante: se agrupa por **`inscripcion_id`** (la matrícula de una persona en una
+  carrera), no por persona ni por cédula. Una misma persona puede estar inscrita en dos carreras a
+  la vez y cursar la misma asignatura en ambas: son 12 personas sobre 13.136 inscripciones, y
+  agruparlas por persona las fusionaba, subcontaba estudiantes y podía arruinar "aprobados
+  completamente" (aprobar todo en una carrera y no en la otra). Cada inscripción pertenece a una
+  sola carrera, así que es la unidad correcta para todo lo que el dashboard llama "estudiante".
 - Los nombres de carrera y asignatura de origen traían tildes inconsistentes/perdidas; se
   normalizan y corrigen con la ortografía oficial del informe (`CARRERA_FIX` / `ASIGNATURA_FIX`
   en `scripts/build_data.py`).

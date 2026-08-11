@@ -1,13 +1,13 @@
 /* Requiere que js/data.js se cargue antes y defina la constante global DATA.
-   Fila de DATA.rows: [studentIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
-   estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen */
+   Fila de DATA.rows: [inscripcionIdx, carreraIdx, asignaturaIdx, docenteIdx, estadoIdx, notaFinal, testProm, examenFinal]
+   estadoIdx: 0 Aprobado, 1 Reprobado, 2 No realizó examen
+
+   R.SID identifica a la INSCRIPCION (persona + carrera), no a la persona: hay
+   estudiantes inscritos en dos carreras a la vez, y cada carrera es una cuenta
+   aparte. Ver el docstring de scripts/build_data.py. */
 
 const R = {SID:0, CARRERA:1, ASIG:2, DOC:3, ESTADO:4, NOTA:5, TESTPROM:6, EXAMEN:7};
 const EST = {APROBADO:0, REPROBADO:1, NORINDIO:2};
-
-/* Con las actas ya subidas no se muestra la fecha de corte de cada carrera: el
-   dato de origen (DATA.meta.fuentes / DATA.dict.carreraFuente en js/data.js)
-   queda solo como trazabilidad de que reporte del SGA salio cada carrera. */
 
 /* ---------- helpers genericos ---------- */
 function el(tag, attrs, children){
