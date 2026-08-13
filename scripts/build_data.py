@@ -71,7 +71,7 @@ OUT = ROOT / "js" / "data.js"
 
 # Fecha del reporte; queda en meta.corte de js/data.js como trazabilidad
 # (el dashboard no la muestra).
-CORTE = "2026-08-11"
+CORTE = "2026-08-12"
 
 LOWER_WORDS = {"de", "del", "la", "las", "el", "los", "y", "en", "a", "al", "con", "por", "para"}
 
